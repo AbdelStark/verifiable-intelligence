@@ -1,0 +1,18 @@
+[package]
+name = "vi-tui"
+description = "ratatui-based TUI surface for the vi binary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+vi-client = { path = "../vi-client" }
+vi-errors = { path = "../vi-errors" }
+vi-verifier = { path = "../vi-verifier" }
+
+[lints]
+workspace = true
