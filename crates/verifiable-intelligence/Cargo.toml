@@ -1,0 +1,25 @@
+[package]
+name = "verifiable-intelligence"
+description = "Umbrella crate for the verifiable-intelligence reference application; installs the vi binary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Umbrella crate is the future cargo install target; flip to true at release time.
+publish = false
+
+[[bin]]
+name = "vi"
+path = "src/main.rs"
+
+[features]
+default = ["tui"]
+tui = ["vi-cli/tui"]
+
+[dependencies]
+vi-cli = { path = "../vi-cli", default-features = false }
+
+[lints]
+workspace = true
