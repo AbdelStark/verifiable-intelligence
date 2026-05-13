@@ -1,0 +1,10 @@
+# rustfmt.toml — RFC-0001 §"Cargo lints and conventions".
+#
+# We stay on stable rustfmt defaults except where the choice has a documented
+# rationale below. Anything not listed here is rustfmt's stable default.
+
+edition = "2021"
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true
