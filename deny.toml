@@ -1,0 +1,50 @@
+# deny.toml — RFC-0001 §"Cargo lints and conventions" + §"Forbidden edges".
+#
+# License gate: MIT-compatible only. GPL-class licenses are denied so that the
+# distribution license of the umbrella crate (MIT) remains valid.
+# Advisory feed: enabled at workspace level; tightened in ci.yml as needed.
+# Forbidden-edge enforcement is handled by `scripts/ci/forbidden_edges.py`,
+# not by cargo-deny `bans`, because cargo-deny enforces what a crate *uses*
+# transitively, not the per-crate manifest layer that RFC-0001 cares about.
+
+[graph]
+all-features = true
+no-default-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# Path-only intra-workspace deps are legitimately versionless until the leaf
+# crates start publishing in v1.x; the wildcard rule still polices upstream
+# crates registered from crates.io.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
