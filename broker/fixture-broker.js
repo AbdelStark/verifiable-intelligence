@@ -5,6 +5,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'fixtures', 'viex', 'manifest.json'), 'utf8'));
 const reference = manifest.reference;
+const TRACE_HEADER = 'x-verifiable-intelligence-trace';
+const PROVIDER_AUDIT_CONTENT_TYPE = 'application/vnd.verifiable-intelligence.audit+binary';
 
 const verifiedProvider = {
   provider_id: 'lab-a100-01',
@@ -111,6 +113,10 @@ function answerFor(prompt, provider) {
   return 'Rainbows show ordered colors because water droplets refract, reflect, and disperse sunlight so each wavelength exits at a different angle.';
 }
 
+function defaultProviderLog(event) {
+  console.error(JSON.stringify(event));
+}
+
 function failReport(id, checkClass, field, detail, now) {
   return {
     overall: 'fail',
@@ -138,7 +144,7 @@ function passReport(now) {
   };
 }
 
-function createBroker({ now = () => Date.now() } = {}) {
+function createBroker({ now = () => Date.now(), providerLog = defaultProviderLog } = {}) {
   const quotes = new Map();
 
   function listProviders() {
@@ -329,7 +335,49 @@ function createBroker({ now = () => Date.now() } = {}) {
     return { status: 200, body: { report: passReport(checkedAt) } };
   }
 
-  return { listProviders, createQuote, chat, verify };
+  function providerAudit(body, traceId) {
+    if (!isJsonObject(body)) {
+      return { status: 400, body: { error: 'request body must be a JSON object' } };
+    }
+    if (containsCredentialField(body)) {
+      return { status: 400, body: { error: 'third-party API keys or credentials are not accepted' } };
+    }
+    if (typeof body.receipt_hash !== 'string' || typeof body.tier !== 'string' || !isJsonObject(body.challenge)) {
+      return { status: 400, body: { error: 'receipt_hash, tier, and challenge are required' } };
+    }
+    if (!Number.isInteger(body.challenge.token_index) || !Array.isArray(body.challenge.layer_indices)) {
+      return { status: 400, body: { error: 'challenge.token_index and challenge.layer_indices are required' } };
+    }
+
+    const started = now();
+    const requestId = `aud_${sha256(canonicalJson(body)).slice(7, 15)}`;
+    const logLine = {
+      event: 'provider.audit',
+      request_id: requestId,
+      tier: body.tier,
+      token_index: body.challenge.token_index,
+      layer_count: body.challenge.layer_indices.length,
+      duration_ms: Math.max(0, now() - started)
+    };
+    if (traceId) logLine.trace_id = traceId;
+    providerLog(logLine);
+
+    return {
+      status: 200,
+      content_type: PROVIDER_AUDIT_CONTENT_TYPE,
+      body: Buffer.from(
+        canonicalJson({
+          request_id: requestId,
+          receipt_hash: body.receipt_hash,
+          tier: body.tier,
+          challenge: body.challenge
+        }),
+        'utf8'
+      )
+    };
+  }
+
+  return { listProviders, createQuote, chat, verify, providerAudit };
 }
 
 function readJsonBody(req) {
@@ -362,6 +410,20 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function sendBytes(res, status, contentType, body) {
+  res.writeHead(status, {
+    'content-type': contentType,
+    'cache-control': 'no-store'
+  });
+  res.end(body);
+}
+
+function traceHeaderValue(headers) {
+  const value = headers[TRACE_HEADER];
+  if (Array.isArray(value)) return value[0];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 async function handleBrokerRequest(broker, req, res) {
   const url = new URL(req.url, 'http://127.0.0.1');
   try {
@@ -381,6 +443,13 @@ async function handleBrokerRequest(broker, req, res) {
     }
     if (req.method === 'POST' && url.pathname === '/verify') {
       const result = broker.verify(await readJsonBody(req));
+      return sendJson(res, result.status, result.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/audit') {
+      const result = broker.providerAudit(await readJsonBody(req), traceHeaderValue(req.headers));
+      if (Buffer.isBuffer(result.body)) {
+        return sendBytes(res, result.status, result.content_type, result.body);
+      }
       return sendJson(res, result.status, result.body);
     }
     return sendJson(res, 404, { error: 'not found' });
