@@ -4,6 +4,21 @@ This guide runs the provider container with Docker Compose. The default service
 uses the CPU stub path so `/healthz`, provider lifecycle logs, and provider API
 guards can be tested without a GPU or live weights.
 
+Use this path when you want the most debuggable local deployment. For the
+managed endpoint path, see [Hugging Face deployment](./hf.md).
+
+## Prerequisites
+
+- Docker Engine with the Compose V2 plugin.
+- `curl` for smoke tests.
+- Access to this repository root.
+- For the GPU profile only: NVIDIA driver, NVIDIA Container Toolkit, one GPU
+  with enough VRAM for the selected W8A8 model, canonical checkpoint hash, and
+  verifier key hash.
+
+The default CPU stub does not require a GPU or model weights. It is a deployment
+smoke, not a live CommitLLM receipt path.
+
 ## CPU Stub
 
 From the repository root:
@@ -12,13 +27,26 @@ From the repository root:
 docker compose -f provider/compose.yaml up --build provider
 ```
 
-Smoke test:
+Example ready log:
+
+```json
+{"commitllm_pin":"25541e83","event":"provider.ready","healthz":"http://127.0.0.1:8000/healthz","level":"info","port":8000}
+```
+
+Healthcheck:
 
 ```bash
-curl -fsS http://127.0.0.1:8000/healthz
+docker compose -f provider/compose.yaml ps
+curl -fsS http://127.0.0.1:8000/healthz | python3 -m json.tool
+```
+
+Chat smoke:
+
+```bash
 curl -fsS http://127.0.0.1:8000/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"messages":[{"role":"user","content":"hello"}],"max_tokens":4096}'
+  -d '{"messages":[{"role":"user","content":"hello"}],"max_tokens":4096}' \
+  | python3 -m json.tool
 ```
 
 The chat response includes `verifiable_intelligence.max_tokens_effective`; it
@@ -42,6 +70,13 @@ The GPU service reserves one NVIDIA GPU and runs `vllm serve` through
 `127.0.0.1:8001` to avoid colliding with vLLM on port `8000`; the Compose
 healthcheck probes that internal port.
 
+Healthcheck:
+
+```bash
+docker compose -f provider/compose.yaml --profile gpu ps
+curl -fsS http://127.0.0.1:8000/healthz | python3 -m json.tool
+```
+
 ## Environment
 
 | Variable | Default | Effect |
@@ -59,6 +94,18 @@ healthcheck probes that internal port.
 | `VI_CHECKPOINT_HASH` | zero hash | Checkpoint hash advertised by `/healthz`. Use the real canonical hash before a live claim. |
 | `VI_KEY_HASH` | zero hash | Verifier key hash advertised by `/healthz`. Use the real key hash before a live claim. |
 
+## Logs
+
+Follow provider lifecycle logs with:
+
+```bash
+docker compose -f provider/compose.yaml logs -f provider
+```
+
+Expected events include `provider.boot`, `provider.ready`, and
+`provider.shutdown`. The boot and health metadata must agree on
+`commitllm_pin`, `model_id`, `checkpoint_hash`, and `key_hash`.
+
 ## Shutdown
 
 Stop the provider with:
@@ -68,3 +115,17 @@ docker compose -f provider/compose.yaml down
 ```
 
 The entrypoint handles `SIGTERM`, emits `provider.shutdown`, and exits cleanly.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `docker compose` is missing | Old Docker install or Compose V1 only | Install Docker Compose V2 and rerun `docker compose version`. |
+| `Cannot connect to the Docker daemon` | Docker Engine is not running | Start Docker Desktop or the system Docker service. |
+| Port `8000` is already allocated | Another local service is bound | Set `VI_PROVIDER_PORT=8001` and use `http://127.0.0.1:8001`. |
+| `/healthz` shows zero hashes | Stub/default metadata | Valid for deployment smoke only; set real `VI_CHECKPOINT_HASH` and `VI_KEY_HASH` before live claims. |
+| Chat requests return `429` | Per-IP rate limit tripped | Lower request rate or raise `VI_RATE_LIMIT_RPM` for local testing. |
+| Chat request returns `413` | Body exceeds `VI_CHAT_BODY_LIMIT_BYTES` | Reduce prompt size or raise the body limit for local testing. |
+| GPU profile cannot see a GPU | NVIDIA runtime not configured | Install NVIDIA Container Toolkit and verify `docker run --gpus all nvidia/cuda:12.4.1-runtime-ubuntu22.04 nvidia-smi`. |
+| GPU profile exits with `vllm: not found` | The current image is still a provider skeleton | Use the CPU stub until the live vLLM provider image gate lands. |
+| `vi chat` reports `receipt_missing` | Stub path returns JSON only | Use `vi chat --no-receipt` for stub testing; use the live GPU path for receipt tests once unblocked. |
