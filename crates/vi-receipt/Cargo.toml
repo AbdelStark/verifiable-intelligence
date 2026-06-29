@@ -1,0 +1,16 @@
+[package]
+name = "vi-receipt"
+description = "Envelope codec for CommitLLM receipts (VIKY, VIRC, VIAU)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+vi-errors = { path = "../vi-errors" }
+
+[lints]
+workspace = true

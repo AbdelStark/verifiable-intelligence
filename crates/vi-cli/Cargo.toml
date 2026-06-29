@@ -1,0 +1,30 @@
+[package]
+name = "vi-cli"
+description = "Library backing the vi command-line binary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "vi_cli"
+path = "src/lib.rs"
+
+[features]
+default = ["tui"]
+tui = ["dep:vi-tui"]
+
+[dependencies]
+vi-client = { path = "../vi-client" }
+vi-errors = { path = "../vi-errors" }
+vi-keygen = { path = "../vi-keygen" }
+vi-log = { path = "../vi-log" }
+vi-receipt = { path = "../vi-receipt" }
+vi-verifier = { path = "../vi-verifier" }
+vi-tui = { path = "../vi-tui", optional = true }
+
+[lints]
+workspace = true

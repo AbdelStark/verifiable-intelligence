@@ -1,0 +1,17 @@
+[package]
+name = "vi-keygen"
+description = "Verifier-key generation (canonical hashing + VIKY envelope emission)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+vi-errors = { path = "../vi-errors" }
+vi-receipt = { path = "../vi-receipt" }
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "vi-verifier"
+description = "Verification pipeline wrapping the upstream CommitLLM verifier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+vi-errors = { path = "../vi-errors" }
+vi-receipt = { path = "../vi-receipt" }
+
+[lints]
+workspace = true
