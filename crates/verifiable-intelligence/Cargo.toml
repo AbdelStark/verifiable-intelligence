@@ -24,7 +24,9 @@ vi-cli = { path = "../vi-cli", default-features = false }
 [dev-dependencies]
 commitllm-keygen = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-keygen" }
 serde_json = "1"
+sha2 = "0.10"
 tempfile = "3"
+vi-receipt = { path = "../vi-receipt" }
 
 [lints]
 workspace = true

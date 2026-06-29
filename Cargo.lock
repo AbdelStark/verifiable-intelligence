@@ -1626,9 +1626,11 @@ name = "verifiable-intelligence"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "sha2",
  "tempfile",
  "verilm-keygen",
  "vi-cli",
+ "vi-receipt",
 ]
 
 [[package]]
@@ -1690,6 +1692,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "serde_json",
+ "sha2",
  "vi-client",
  "vi-errors",
  "vi-keygen",
