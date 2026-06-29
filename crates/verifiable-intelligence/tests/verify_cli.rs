@@ -22,6 +22,10 @@ fn stderr_json(output: &std::process::Output) -> Value {
     serde_json::from_slice(&output.stderr).expect("stderr should be a JSON error envelope")
 }
 
+fn stdout_utf8(output: &std::process::Output) -> String {
+    String::from_utf8(output.stdout.clone()).expect("stdout should be UTF-8")
+}
+
 #[test]
 fn verify_full_fixture_outputs_verify_report_json() {
     let fixture = FullFixture::write(false);
@@ -57,6 +61,56 @@ fn verify_full_fixture_outputs_verify_report_json() {
             "decode_policy"
         ])
     );
+}
+
+#[test]
+fn verify_pretty_uses_color_and_no_color_env_suppresses_it() {
+    let fixture = FullFixture::write(false);
+
+    let colored = vi_command()
+        .args(["verify", "--pretty", "--receipt"])
+        .arg(&fixture.receipt_path)
+        .arg("--key")
+        .arg(&fixture.key_path)
+        .args(["--tier", "full", "--audit-endpoint"])
+        .arg(fixture.audit_file_endpoint())
+        .env_remove("VI_NO_COLOR")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("vi should run");
+
+    assert_eq!(colored.status.code(), Some(0));
+    assert!(colored.stderr.is_empty());
+    let colored_stdout = stdout_utf8(&colored);
+    assert!(colored_stdout.contains('\n'));
+    assert!(colored_stdout.contains('\x1b'));
+    let stripped: Value =
+        serde_json::from_str(&strip_ansi(&colored_stdout)).expect("pretty output is JSON");
+    assert_eq!(stripped["schema_version"], 1);
+    assert_eq!(stripped["subcommand"], "verify");
+    assert_eq!(stripped["tier"], "full");
+    assert_eq!(stripped["verdict"], "pass");
+
+    let no_color = vi_command()
+        .args(["verify", "--pretty", "--receipt"])
+        .arg(&fixture.receipt_path)
+        .arg("--key")
+        .arg(&fixture.key_path)
+        .args(["--tier", "full", "--audit-endpoint"])
+        .arg(fixture.audit_file_endpoint())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("vi should run");
+
+    assert_eq!(no_color.status.code(), Some(0));
+    assert!(no_color.stderr.is_empty());
+    let no_color_stdout = stdout_utf8(&no_color);
+    assert!(!no_color_stdout.contains('\x1b'));
+    let plain: Value = serde_json::from_str(&no_color_stdout).expect("plain output is JSON");
+    assert_eq!(plain["schema_version"], stripped["schema_version"]);
+    assert_eq!(plain["subcommand"], stripped["subcommand"]);
+    assert_eq!(plain["tier"], stripped["tier"]);
+    assert_eq!(plain["verdict"], stripped["verdict"]);
 }
 
 #[test]
@@ -188,4 +242,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
         let _ = write!(&mut output, "{byte:02x}");
     }
     output
+}
+
+fn strip_ansi(value: &str) -> String {
+    value.replace("\x1b[36m", "").replace("\x1b[0m", "")
 }

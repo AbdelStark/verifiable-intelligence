@@ -15,6 +15,10 @@ fn stderr_json(output: &std::process::Output) -> Value {
     serde_json::from_slice(&output.stderr).expect("stderr should be a JSON error envelope")
 }
 
+fn stdout_utf8(output: &std::process::Output) -> String {
+    String::from_utf8(output.stdout.clone()).expect("stdout should be UTF-8")
+}
+
 #[test]
 fn keygen_outputs_schema_json_and_writes_viky() {
     let checkpoint = synthetic_commitllm_checkpoint();
@@ -67,6 +71,35 @@ fn keygen_outputs_schema_json_and_writes_viky() {
 
     let key_bytes = fs::read(&key_path).expect("key file should exist");
     assert_eq!(&key_bytes[..4], b"VIKY");
+}
+
+#[test]
+fn keygen_pretty_outputs_colored_json_object() {
+    let checkpoint = synthetic_commitllm_checkpoint();
+    let output_dir = tempfile::tempdir().expect("output tempdir");
+    let key_path = output_dir.path().join("toy.viky");
+
+    let output = vi_command()
+        .args(["keygen", "--pretty", "--model", "toy-model", "--checkpoint"])
+        .arg(checkpoint.path())
+        .arg("--output")
+        .arg(&key_path)
+        .args(["--seed", "7"])
+        .env_remove("VI_NO_COLOR")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("vi should run");
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = stdout_utf8(&output);
+    assert!(stdout.contains('\n'));
+    assert!(stdout.contains('\x1b'));
+    let value: Value = serde_json::from_str(&strip_ansi(&stdout)).expect("pretty output is JSON");
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["subcommand"], "keygen");
+    assert_eq!(value["model_id"], "toy-model");
+    assert_eq!(value["seed"], 7);
+    assert!(key_path.exists());
 }
 
 #[test]
@@ -237,6 +270,10 @@ fn write_toy_safetensors(checkpoint: &Path) {
         ],
     )
     .expect("safetensors should be written");
+}
+
+fn strip_ansi(value: &str) -> String {
+    value.replace("\x1b[36m", "").replace("\x1b[0m", "")
 }
 
 fn i8_values(len: usize, offset: usize) -> Vec<i8> {
