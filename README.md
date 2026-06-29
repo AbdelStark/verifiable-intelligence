@@ -69,6 +69,7 @@ Guides:
 
 - [Buyer proof guide](./docs/guides/buyer-proof-guide.md)
 - [Provider integration guide](./docs/guides/provider-integration-guide.md)
+- [Self-hosted provider compose guide](./docs/deployment/self-hosted.md)
 - [v0.1.0 pivot demo release notes](./docs/release/v0.1.0-pivot-demo.md)
 
 ## Protocol Pin

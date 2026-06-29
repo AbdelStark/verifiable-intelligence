@@ -1,0 +1,65 @@
+name: verifiable-intelligence-provider
+
+x-provider-env: &provider-env
+  COMMITLLM_SHORT: ${COMMITLLM_SHORT:-25541e83}
+  MODEL_DIR: ${MODEL_DIR:-/weights}
+  MODEL_ID: ${MODEL_ID:-llama-3.1-8b-w8a8}
+  VI_AUDIT_RATE_LIMIT_RPM: ${VI_AUDIT_RATE_LIMIT_RPM:-120}
+  VI_BIND_ADDR: 0.0.0.0:8000
+  VI_CHECKPOINT_HASH: ${VI_CHECKPOINT_HASH:-sha256:0000000000000000000000000000000000000000000000000000000000000000}
+  VI_KEY_HASH: ${VI_KEY_HASH:-sha256:0000000000000000000000000000000000000000000000000000000000000000}
+  VI_LOG_LEVEL: ${VI_LOG_LEVEL:-info}
+  VI_MAX_NUM_SEQS: ${VI_MAX_NUM_SEQS:-8}
+  VI_MAX_TOKENS: ${VI_MAX_TOKENS:-1024}
+  VI_RATE_LIMIT_RPM: ${VI_RATE_LIMIT_RPM:-12}
+
+x-provider-base: &provider-base
+  build:
+    context: ..
+    dockerfile: provider/Dockerfile
+  image: ${VI_PROVIDER_IMAGE:-verifiable-intelligence-provider:local}
+  ports:
+    - "${VI_PROVIDER_PORT:-8000}:8000"
+  healthcheck:
+    test:
+      - CMD
+      - python3
+      - -c
+      - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()"
+    interval: 10s
+    timeout: 3s
+    retries: 9
+    start_period: 30s
+  restart: unless-stopped
+
+services:
+  provider:
+    <<: *provider-base
+    environment:
+      <<: *provider-env
+      VI_PROVIDER_STUB: ${VI_PROVIDER_STUB:-1}
+
+  provider-gpu:
+    <<: *provider-base
+    profiles: ["gpu"]
+    environment:
+      <<: *provider-env
+      VI_HEALTHZ_BIND_ADDR: ${VI_HEALTHZ_BIND_ADDR:-127.0.0.1:8001}
+      VI_PROVIDER_STUB: "0"
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 9
+      start_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
