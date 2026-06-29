@@ -5,6 +5,8 @@
 // Verification failures must flow through the shared `ViError` taxonomy.
 #![allow(clippy::result_large_err)]
 
+use std::time::Instant;
+
 use commitllm_core::{
     serialize,
     types::{AuditChallenge as CommitllmAuditChallenge, AuditTier as CommitllmAuditTier},
@@ -60,6 +62,27 @@ pub struct VerifyReport {
     pub warnings: Vec<String>,
 }
 
+/// Structured verifier phase event for logs, TUI, and browser demo consumers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PhaseEvent {
+    /// A project-level verification phase started.
+    Started {
+        /// Stable project phase identifier.
+        phase: PhaseId,
+    },
+    /// A project-level verification phase ended.
+    Ended {
+        /// Stable project phase identifier.
+        phase: PhaseId,
+        /// Whether the phase passed.
+        passed: bool,
+        /// Failure detail suitable for demo/UI rendering.
+        detail: Option<String>,
+        /// Milliseconds elapsed since the verification run started.
+        elapsed_ms: u64,
+    },
+}
+
 /// Provider abstraction used for tiers that need a `VIAU` audit opening.
 pub trait AuditProvider {
     /// Fetch a `VIAU` audit opening for the given receipt and tier.
@@ -72,6 +95,45 @@ pub trait AuditProvider {
 
 /// Verify a project-wrapped receipt/key pair at the requested tier.
 pub fn verify(
+    receipt_bytes: &[u8],
+    key_bytes: &[u8],
+    tier: AuditTier,
+    audit_provider: &mut dyn AuditProvider,
+) -> Result<VerifyReport, ViError> {
+    verify_inner(receipt_bytes, key_bytes, tier, audit_provider, |_| {})
+}
+
+/// Verify a project-wrapped receipt/key pair and emit phase-boundary events.
+pub fn verify_with_callback(
+    receipt_bytes: &[u8],
+    key_bytes: &[u8],
+    tier: AuditTier,
+    audit_provider: &mut dyn AuditProvider,
+    phase_callback: impl FnMut(PhaseEvent),
+) -> Result<VerifyReport, ViError> {
+    verify_inner(
+        receipt_bytes,
+        key_bytes,
+        tier,
+        audit_provider,
+        phase_callback,
+    )
+}
+
+fn verify_inner(
+    receipt_bytes: &[u8],
+    key_bytes: &[u8],
+    tier: AuditTier,
+    audit_provider: &mut dyn AuditProvider,
+    mut phase_callback: impl FnMut(PhaseEvent),
+) -> Result<VerifyReport, ViError> {
+    let started_at = Instant::now();
+    let result = run_verification_core(receipt_bytes, key_bytes, tier, audit_provider);
+    emit_phase_events(&result, &mut phase_callback, started_at);
+    result
+}
+
+fn run_verification_core(
     receipt_bytes: &[u8],
     key_bytes: &[u8],
     tier: AuditTier,
@@ -102,6 +164,54 @@ pub fn verify(
 }
 
 pub fn placeholder() {}
+
+fn emit_phase_events(
+    result: &Result<VerifyReport, ViError>,
+    callback: &mut dyn FnMut(PhaseEvent),
+    started_at: Instant,
+) {
+    let failure = result
+        .as_ref()
+        .err()
+        .map(|error| (phase_for_error(error), error.to_string()));
+
+    for phase in VERIFY_PHASES {
+        callback(PhaseEvent::Started { phase });
+
+        let Some((failed_phase, detail)) = &failure else {
+            callback(PhaseEvent::Ended {
+                phase,
+                passed: true,
+                detail: None,
+                elapsed_ms: elapsed_millis(started_at),
+            });
+            continue;
+        };
+
+        let passed = phase != *failed_phase;
+        callback(PhaseEvent::Ended {
+            phase,
+            passed,
+            detail: if passed { None } else { Some(detail.clone()) },
+            elapsed_ms: elapsed_millis(started_at),
+        });
+
+        if !passed {
+            break;
+        }
+    }
+}
+
+fn phase_for_error(error: &ViError) -> PhaseId {
+    match error {
+        ViError::VerificationFailed { phase, .. } => *phase,
+        _ => VERIFY_PHASES[0],
+    }
+}
+
+fn elapsed_millis(started_at: Instant) -> u64 {
+    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
 
 fn decode_project_key(bytes: &[u8]) -> Result<(vi_receipt::KeyBindingHeader, Vec<u8>), ViError> {
     let envelope = Envelope::decode(bytes)?;
@@ -403,6 +513,72 @@ mod tests {
     }
 
     #[test]
+    fn verify_with_callback_emits_mock_consumer_sequence_for_early_failure() {
+        let key = project_key("model-a");
+        let receipt = project_receipt("model-b", &sha256_hex(&key));
+        let mut direct_audit_provider = RecordingAuditProvider::default();
+        let mut callback_audit_provider = RecordingAuditProvider::default();
+        let mut events = Vec::new();
+
+        let direct_error = verify(
+            &receipt,
+            &key,
+            AuditTier::Routine,
+            &mut direct_audit_provider,
+        )
+        .expect_err("identity mismatch should fail");
+        let callback_error = verify_with_callback(
+            &receipt,
+            &key,
+            AuditTier::Routine,
+            &mut callback_audit_provider,
+            |event| events.push(event),
+        )
+        .expect_err("identity mismatch should fail");
+
+        assert_eq!(callback_error, direct_error);
+        assert_eq!(
+            event_markers(&events),
+            vec![
+                ("started", PhaseId::EmbeddingMerkle, None),
+                ("ended", PhaseId::EmbeddingMerkle, Some(false)),
+            ]
+        );
+        assert_eq!(direct_audit_provider.calls, 0);
+        assert_eq!(callback_audit_provider.calls, 0);
+
+        let PhaseEvent::Ended {
+            detail: Some(detail),
+            ..
+        } = &events[1]
+        else {
+            panic!("failed phase should carry detail");
+        };
+        assert!(detail.contains("identity mismatch"));
+    }
+
+    #[test]
+    fn phase_event_walk_marks_all_phases_on_success() {
+        let result = Ok(VerifyReport {
+            tier: AuditTier::Routine,
+            verdict: VerifyVerdict::Pass,
+            phases: VERIFY_PHASES.to_vec(),
+            checks_run: VERIFY_PHASES.len(),
+            checks_passed: VERIFY_PHASES.len(),
+            warnings: Vec::new(),
+        });
+        let mut events = Vec::new();
+
+        emit_phase_events(&result, &mut |event| events.push(event), Instant::now());
+
+        let expected = VERIFY_PHASES
+            .into_iter()
+            .flat_map(|phase| [("started", phase, None), ("ended", phase, Some(true))])
+            .collect::<Vec<_>>();
+        assert_eq!(event_markers(&events), expected);
+    }
+
+    #[test]
     fn routine_tier_never_fetches_audit_payload() {
         let key = project_key("model-a");
         let receipt = project_receipt("model-a", &sha256_hex(&key));
@@ -461,5 +637,15 @@ mod tests {
         Envelope::new(Magic::VIRC, payload)
             .encode()
             .expect("VIRC envelope encodes")
+    }
+
+    fn event_markers(events: &[PhaseEvent]) -> Vec<(&'static str, PhaseId, Option<bool>)> {
+        events
+            .iter()
+            .map(|event| match event {
+                PhaseEvent::Started { phase } => ("started", *phase, None),
+                PhaseEvent::Ended { phase, passed, .. } => ("ended", *phase, Some(*passed)),
+            })
+            .collect()
     }
 }
