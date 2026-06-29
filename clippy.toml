@@ -1,0 +1,15 @@
+# clippy.toml — RFC-0001 §"Cargo lints and conventions".
+#
+# Workspace clippy levels live in the root Cargo.toml under [workspace.lints.clippy].
+# This file holds clippy's configurable knobs (numeric thresholds, allowlists),
+# not the lint levels themselves.
+
+# Match the MSRV declared in [workspace.package]. Clippy will not suggest
+# lint fixes that require a newer toolchain than this.
+msrv = "1.82"
+
+# Keep cognitive-complexity firm so refactors stay tractable in leaf crates.
+cognitive-complexity-threshold = 25
+
+# Functions over 90 lines warrant a `clippy::too_many_lines` reminder.
+too-many-lines-threshold = 90
