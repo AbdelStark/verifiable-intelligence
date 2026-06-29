@@ -19,6 +19,8 @@ This is a research proof of concept. It is not a token resale service, not a pay
 
 The older Rust CLI remains useful for key generation, fixture validation, CI, and power users. The old TUI is no longer the primary demo surface.
 
+The v1 live reference model is `llama-3.1-8b-w8a8` with CommitLLM profile `llama-w8a8-audited` at pin `25541e83`; see [`docs/spikes/reference-model.md`](./docs/spikes/reference-model.md).
+
 ## What v1 is not
 
 - No closed-weight model verification. CommitLLM requires public weights.

@@ -6,8 +6,8 @@
     "quote_id": "qt_missing_receipt",
     "provider_id": "desk-a10g-cheap",
     "model_id": "llama-3.1-8b-w8a8",
-    "checkpoint_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "commitllm_pin": "95c0ffee",
+    "checkpoint_hash": "sha256:a41e82812a261708ec253803904d482a00e8d06d9f6d119418f2d9dc3edafeef",
+    "commitllm_pin": "25541e83",
     "key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
     "decode_policy_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
     "price": {
@@ -37,8 +37,8 @@
   },
   "verifier": {
     "key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-    "key_ref": "demo://keys/lab-l4-01",
-    "commitllm_pin": "95c0ffee",
+    "key_ref": "demo://keys/lab-a100-01",
+    "commitllm_pin": "25541e83",
     "verifier_version": "demo-fixture-1",
     "verification_mode": "browser-simulated"
   },

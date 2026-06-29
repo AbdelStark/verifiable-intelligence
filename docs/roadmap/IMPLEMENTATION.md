@@ -12,7 +12,7 @@ The new v1 target is the marketplace proof demo from [RFC-0016](../rfcs/RFC-0016
 | Browser verifier | Deferred to v1.1 | v1-critical WASM spike and measured decision |
 | Proof artifact | Binary receipt/key/audit envelopes only | `VIEX` bundle schema joining quote, prompt, answer, receipt, key, audit, report |
 | Marketplace context | Not modeled | Provider catalog, quote, price, expiry, provider identity, lawful-use boundary |
-| Provider model choice | Llama 3.2 1B W8A8 corridor blocker | Prefer CommitLLM-supported measured Llama/Qwen W8A8 profile |
+| Provider model choice | Llama 3.2 1B W8A8 corridor blocker | Selected `llama-3.1-8b-w8a8` with CommitLLM profile `llama-w8a8-audited`; see #126 |
 | Red paths | Receipt byte tamper only | Model swap, prompt mismatch, answer rewrite, expired quote, wrong key, unsupported model |
 | Safety framing | Provider abuse controls | Explicit no unauthorized resale, no credential handling, no closed-weight proof claim |
 | Release gates | CLI timing and TUI comprehension | Browser demo completion, red-path comprehension, bundle validation, WASM spike |

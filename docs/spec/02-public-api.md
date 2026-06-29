@@ -45,12 +45,12 @@ Returns authorized demo providers:
 {
   "providers": [
     {
-      "provider_id": "lab-l4-01",
-      "display_name": "Lab L4 01",
+      "provider_id": "lab-a100-01",
+      "display_name": "Lab A100 01",
       "model_id": "llama-3.1-8b-w8a8",
       "checkpoint_hash": "sha256:...",
       "key_hash": "sha256:...",
-      "commitllm_pin": "abcdef0",
+      "commitllm_pin": "25541e83",
       "proof_modes": ["routine", "deep"],
       "price_per_1k_tokens_usd": "0.012"
     }
@@ -64,7 +64,7 @@ Request:
 
 ```json
 {
-  "provider_id": "lab-l4-01",
+  "provider_id": "lab-a100-01",
   "model_id": "llama-3.1-8b-w8a8",
   "max_tokens": 256,
   "decode_policy": {
@@ -79,11 +79,11 @@ Response:
 ```json
 {
   "quote_id": "qt_...",
-  "provider_id": "lab-l4-01",
+  "provider_id": "lab-a100-01",
   "model_id": "llama-3.1-8b-w8a8",
   "checkpoint_hash": "sha256:...",
   "key_hash": "sha256:...",
-  "commitllm_pin": "abcdef0",
+  "commitllm_pin": "25541e83",
   "expires_unix_ms": 1782735000000,
   "estimated_price_usd": "0.0048",
   "signature": "demo:..."
@@ -132,7 +132,7 @@ The provider API inherits the old receipt surface:
   "status": "ok",
   "model_id": "llama-3.1-8b-w8a8",
   "checkpoint_hash": "sha256:...",
-  "commitllm_pin": "abcdef0",
+  "commitllm_pin": "25541e83",
   "key_hash": "sha256:..."
 }
 ```
