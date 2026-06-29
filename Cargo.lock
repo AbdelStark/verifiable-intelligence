@@ -1461,6 +1461,7 @@ name = "vi-client"
 version = "0.0.0"
 dependencies = [
  "reqwest",
+ "serde_json",
  "vi-errors",
  "vi-receipt",
 ]
