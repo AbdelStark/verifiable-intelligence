@@ -1,0 +1,9 @@
+[package]
+name = "zstd"
+version = "0.13.3"
+edition = "2021"
+license = "MIT"
+description = "Small zstd crate compatibility shim backed by pure-Rust ruzstd for wasm verifier builds"
+
+[dependencies]
+ruzstd = "0.8.3"

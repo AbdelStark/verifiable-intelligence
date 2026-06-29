@@ -1,0 +1,97 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CommitLLM WASM verifier harness</title>
+<body>
+  <div id="status">pending</div>
+  <pre id="results"></pre>
+  <script type="module">
+    import init, { commitllm_pin, verify_viex_bundle } from './pkg/vi_commitllm_verifier.js';
+
+    async function bytes(path) {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+      return new Uint8Array(await response.arrayBuffer());
+    }
+
+    async function json(path) {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+      return response.json();
+    }
+
+    function b64ToBytes(value) {
+      return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+    }
+
+    function bytesToB64(value) {
+      let binary = '';
+      for (const byte of value) binary += String.fromCharCode(byte);
+      return btoa(binary);
+    }
+
+    async function sha256(bytesValue) {
+      const digest = await crypto.subtle.digest('SHA-256', bytesValue);
+      return 'sha256:' + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function timed(label, iterations, fn) {
+      const samples = [];
+      let last;
+      for (let i = 0; i < iterations; i += 1) {
+        const start = performance.now();
+        last = fn();
+        samples.push(performance.now() - start);
+      }
+      samples.sort((a, b) => a - b);
+      return {
+        label,
+        iterations,
+        p50_ms: samples[Math.floor((samples.length - 1) * 0.5)],
+        p95_ms: samples[Math.floor((samples.length - 1) * 0.95)],
+        min_ms: samples[0],
+        max_ms: samples[samples.length - 1],
+        last
+      };
+    }
+
+    async function main() {
+      await init();
+      const heapBefore = performance.memory?.usedJSHeapSize ?? null;
+      const keyBytes = await bytes('./fixtures/v4_key_fullbridge.bin');
+      const happyBundle = await json('./fixtures/commitllm-fullbridge.viex.json');
+
+      const tamperedBundle = structuredClone(happyBundle);
+      const tamperedReceipt = b64ToBytes(tamperedBundle.receipt.bytes_b64);
+      tamperedReceipt[tamperedReceipt.length - 1] ^= 0xff;
+      tamperedBundle.receipt.bytes_b64 = bytesToB64(tamperedReceipt);
+      tamperedBundle.receipt.sha256 = await sha256(tamperedReceipt);
+
+      const happy = await timed('happy', 20, () => JSON.parse(verify_viex_bundle(JSON.stringify(happyBundle), keyBytes)));
+      const tampered = await timed('tampered', 20, () => JSON.parse(verify_viex_bundle(JSON.stringify(tamperedBundle), keyBytes)));
+      const heapAfter = performance.memory?.usedJSHeapSize ?? null;
+
+      window.__commitllmWasmResults = {
+        package: {
+          commitllm_pin: commitllm_pin(),
+          verification_mode: 'browser-wasm'
+        },
+        happy,
+        tampered,
+        memory: {
+          used_js_heap_before_bytes: heapBefore,
+          used_js_heap_after_bytes: heapAfter,
+          used_js_heap_delta_bytes: heapBefore === null || heapAfter === null ? null : heapAfter - heapBefore
+        }
+      };
+      document.querySelector('#status').textContent =
+        happy.last.overall === 'pass' && tampered.last.overall === 'fail' ? 'pass' : 'fail';
+      document.querySelector('#results').textContent = JSON.stringify(window.__commitllmWasmResults, null, 2);
+    }
+
+    main().catch((error) => {
+      window.__commitllmWasmError = error.stack || String(error);
+      document.querySelector('#status').textContent = 'error';
+      document.querySelector('#results').textContent = window.__commitllmWasmError;
+    });
+  </script>
+</body>

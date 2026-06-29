@@ -48,6 +48,15 @@ Proof bundle fixture validation:
 npm run test:bundle
 ```
 
+Pinned CommitLLM browser-WASM verifier harness:
+
+```bash
+npm run build:wasm
+npm run test:wasm
+```
+
+The static demo still labels its in-page checks as simulated. The WASM harness under `verifier/wasm/` is the real browser verifier path for the pinned upstream full-bridge fixture.
+
 ## Why CommitLLM
 
 CommitLLM returns a compact receipt and opens trace data only when challenged. On supported open-weight deployments, verifier work is CPU-side and provider serving stays on the normal GPU path. Its current boundary matters: model identity, prompt/request binding, decode policy, delivered answer, and many execution checks are covered; arbitrary-position attention output on stock GPU kernels remains a documented open problem upstream.

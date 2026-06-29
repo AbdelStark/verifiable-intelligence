@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
+    "build:wasm": "wasm-pack build verifier/wasm --target web --release --out-dir pkg --out-name vi_commitllm_verifier && rm -f verifier/wasm/pkg/.gitignore",
     "test:demo": "playwright test",
+    "test:wasm": "playwright test tests/commitllm-wasm.spec.js",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
     "test:broker": "node scripts/test-broker-api.js",
