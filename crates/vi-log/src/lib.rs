@@ -103,6 +103,7 @@ pub fn init_with_filter(
         .with_target(false)
         .with_current_span(false)
         .with_span_list(false)
+        .with_writer(std::io::stderr)
         .event_format(ViEventFormatter::new(subcommand, trace_id))
         .with_filter(filter);
 
@@ -168,7 +169,7 @@ where
 {
     fn format_event(
         &self,
-        _context: &FmtContext<'_, S, N>,
+        context: &FmtContext<'_, S, N>,
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
@@ -182,6 +183,7 @@ where
             "level".to_owned(),
             Value::String(metadata.level().as_str().to_ascii_lowercase()),
         );
+        insert_span_context(context, &mut object);
         object.insert(
             "subcommand".to_owned(),
             Value::String(self.subcommand.clone()),
@@ -194,11 +196,119 @@ where
     }
 }
 
+fn insert_span_context<S, N>(context: &FmtContext<'_, S, N>, object: &mut Map<String, Value>)
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+{
+    let Some(scope) = context.event_scope() else {
+        return;
+    };
+    let spans: Vec<_> = scope
+        .from_root()
+        .map(|span| Value::String(span.name().to_owned()))
+        .collect();
+    let Some(Value::String(current)) = spans.last() else {
+        return;
+    };
+
+    object.insert("span".to_owned(), Value::String(current.clone()));
+    object.insert("spans".to_owned(), Value::Array(spans));
+}
+
 fn unix_timestamp_ms() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_millis())
         .to_string()
+}
+
+/// Stable project-owned event names.
+pub mod event {
+    /// Process invocation started.
+    pub const PROCESS_START: &str = "process.start";
+    /// Process invocation completed.
+    pub const PROCESS_END: &str = "process.end";
+    /// Process invocation ended with an error.
+    pub const PROCESS_ERROR: &str = "process.error";
+    /// A project verifier phase started.
+    pub const VERIFY_PHASE_START: &str = "verify.phase.start";
+    /// A project verifier phase ended.
+    pub const VERIFY_PHASE_END: &str = "verify.phase.end";
+}
+
+/// Build the root span for a CLI subcommand invocation.
+#[must_use]
+pub fn cli_span(subcommand: &str) -> tracing::Span {
+    match subcommand {
+        "keygen" => tracing::info_span!("cli.keygen"),
+        "chat" => tracing::info_span!("cli.chat"),
+        "verify" => tracing::info_span!("cli.verify"),
+        "tui" => tracing::info_span!("cli.tui"),
+        _ => tracing::info_span!("cli.other", subcommand),
+    }
+}
+
+/// Build the child span for a project verifier phase.
+#[must_use]
+pub fn verify_phase_span(phase: &str) -> tracing::Span {
+    match phase {
+        "embedding_merkle" => tracing::debug_span!("verify.phase.embedding_merkle"),
+        "shell_freivalds" => tracing::debug_span!("verify.phase.shell_freivalds"),
+        "bridge_replay" => tracing::debug_span!("verify.phase.bridge_replay"),
+        "attention_corridor" => tracing::debug_span!("verify.phase.attention_corridor"),
+        "kv_provenance" => tracing::debug_span!("verify.phase.kv_provenance"),
+        "lm_head" => tracing::debug_span!("verify.phase.lm_head"),
+        "decode_policy" => tracing::debug_span!("verify.phase.decode_policy"),
+        _ => tracing::debug_span!("verify.phase.other", phase),
+    }
+}
+
+/// Emit a process start event.
+pub fn emit_process_start(args: &[String]) {
+    tracing::info!(event = event::PROCESS_START, args = args.join(" "));
+}
+
+/// Emit a process completion event.
+pub fn emit_process_end(exit_code: i32, elapsed_ms: u64) {
+    tracing::info!(
+        event = event::PROCESS_END,
+        exit_code = i64::from(exit_code),
+        elapsed_ms
+    );
+}
+
+/// Emit a process error event.
+pub fn emit_process_error(category: &str, exit_code: i32) {
+    tracing::info!(
+        event = event::PROCESS_ERROR,
+        category,
+        exit_code = i64::from(exit_code)
+    );
+}
+
+/// Emit a verifier phase-start event inside the matching phase span.
+pub fn emit_verify_phase_start(phase: &str) {
+    let span = verify_phase_span(phase);
+    let _guard = span.enter();
+    tracing::debug!(event = event::VERIFY_PHASE_START, phase);
+}
+
+/// Emit a verifier phase-end event inside the matching phase span.
+pub fn emit_verify_phase_end(phase: &str, passed: bool, elapsed_ms: u64, detail: Option<&str>) {
+    let span = verify_phase_span(phase);
+    let _guard = span.enter();
+    if let Some(detail) = detail {
+        tracing::debug!(
+            event = event::VERIFY_PHASE_END,
+            phase,
+            passed,
+            elapsed_ms,
+            detail
+        );
+    } else {
+        tracing::debug!(event = event::VERIFY_PHASE_END, phase, passed, elapsed_ms);
+    }
 }
 
 /// Subscriber-level redaction policy for event fields.
@@ -620,12 +730,111 @@ mod tests {
             .contains("202122"));
     }
 
+    #[test]
+    fn event_helpers_match_representative_snapshot() {
+        let buffer = SharedBuffer::default();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_target(false)
+                .with_current_span(false)
+                .with_span_list(false)
+                .with_writer(buffer.clone())
+                .event_format(ViEventFormatter::new("verify", "trace-test"))
+                .with_filter(EnvFilter::new("debug")),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = cli_span("verify");
+            let _guard = span.enter();
+            emit_process_start(&[
+                "vi".to_owned(),
+                "verify".to_owned(),
+                "--api-key".to_owned(),
+                "secret-token".to_owned(),
+            ]);
+            emit_verify_phase_start("embedding_merkle");
+            emit_verify_phase_end("embedding_merkle", true, 7, None);
+            emit_process_end(0, 9);
+        });
+
+        let normalized = normalized_lines(&buffer.lines());
+        let actual = serde_json::to_string_pretty(&normalized).expect("snapshot serializes");
+        let expected = r#"[
+  {
+    "args": "vi verify --api-key [REDACTED]",
+    "event": "process.start",
+    "level": "info",
+    "span": "cli.verify",
+    "spans": [
+      "cli.verify"
+    ],
+    "subcommand": "verify",
+    "timestamp": "<timestamp>",
+    "trace_id": "trace-test"
+  },
+  {
+    "event": "verify.phase.start",
+    "level": "debug",
+    "phase": "embedding_merkle",
+    "span": "verify.phase.embedding_merkle",
+    "spans": [
+      "cli.verify",
+      "verify.phase.embedding_merkle"
+    ],
+    "subcommand": "verify",
+    "timestamp": "<timestamp>",
+    "trace_id": "trace-test"
+  },
+  {
+    "elapsed_ms": 7,
+    "event": "verify.phase.end",
+    "level": "debug",
+    "passed": true,
+    "phase": "embedding_merkle",
+    "span": "verify.phase.embedding_merkle",
+    "spans": [
+      "cli.verify",
+      "verify.phase.embedding_merkle"
+    ],
+    "subcommand": "verify",
+    "timestamp": "<timestamp>",
+    "trace_id": "trace-test"
+  },
+  {
+    "elapsed_ms": 9,
+    "event": "process.end",
+    "exit_code": 0,
+    "level": "info",
+    "span": "cli.verify",
+    "spans": [
+      "cli.verify"
+    ],
+    "subcommand": "verify",
+    "timestamp": "<timestamp>",
+    "trace_id": "trace-test"
+  }
+]"#;
+        assert_eq!(actual, expected);
+    }
+
     fn sample_value(field: &str) -> Value {
         match field {
             "args" => serde_json::json!(["vi", "chat", "--api-key", "secret-token"]),
             "receipt_bytes" | "audit_bytes" => Value::String("secret-bytes".to_owned()),
             _ => Value::String(format!("sample-{field}")),
         }
+    }
+
+    fn normalized_lines(lines: &[String]) -> Vec<Value> {
+        lines
+            .iter()
+            .map(|line| {
+                let mut value: Value = serde_json::from_str(line).expect("log line is JSON");
+                value["timestamp"] = Value::String("<timestamp>".to_owned());
+                value
+            })
+            .collect()
     }
 
     #[derive(Debug, Clone, Default)]
