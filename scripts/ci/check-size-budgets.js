@@ -18,6 +18,13 @@ const budgets = [
     source: 'docs/spec/08-performance-budget.md',
   },
   {
+    label: 'CommitLLM verifier key fixture',
+    path: 'verifier/wasm/fixtures/v4_key_fullbridge.bin',
+    target_bytes: 10 * 1024 * 1024,
+    limit_bytes: 11 * 1024 * 1024,
+    source: 'docs/spec/08-performance-budget.md',
+  },
+  {
     label: 'WASM JS loader',
     path: 'verifier/wasm/pkg/vi_commitllm_verifier.js',
     limit_bytes: 500 * 1024,
@@ -46,9 +53,12 @@ function collectViexBudgets() {
 function collectRows() {
   return [...budgets, ...collectViexBudgets()].map((budget) => {
     const size_bytes = fileSizeBytes(budget.path);
+    const target_bytes = budget.target_bytes ?? budget.limit_bytes;
     return {
       ...budget,
+      target_bytes,
       size_bytes,
+      within_target: size_bytes <= target_bytes,
       within_budget: size_bytes <= budget.limit_bytes,
     };
   });
@@ -58,12 +68,12 @@ function renderMarkdown(rows) {
   const lines = [
     '## Size Budgets',
     '',
-    '| Artifact | Size | Limit | Status |',
-    '| --- | ---: | ---: | --- |',
+    '| Artifact | Size | Target | Hard limit | Status |',
+    '| --- | ---: | ---: | ---: | --- |',
   ];
   for (const row of rows) {
     lines.push(
-      `| \`${row.path}\` | ${row.size_bytes} bytes | ${row.limit_bytes} bytes | ${
+      `| \`${row.path}\` | ${row.size_bytes} bytes | ${row.target_bytes} bytes | ${row.limit_bytes} bytes | ${
         row.within_budget ? 'pass' : 'fail'
       } |`
     );

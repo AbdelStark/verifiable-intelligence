@@ -19,6 +19,7 @@ The pivot moves the user-facing budget from CLI/TUI timing to browser demo and p
 | Embedded receipt | measured | Publish actual CommitLLM size |
 | Deep audit bundle | measured | May exceed routine target |
 | Browser verifier WASM | < 10 MB preferred | Spike may revise |
+| CommitLLM verifier key fixture | < 10 MB target; fail above 11 MB | CI gates the checked-in full-bridge key until the canonical `llama-3.2-1b-w8a8` key artifact exists |
 
 ## CLI utility budgets
 
@@ -40,7 +41,7 @@ The pivot moves the user-facing budget from CLI/TUI timing to browser demo and p
 - Publish hardware, browser, CommitLLM pin, model ID, and fixture size.
 - Report p50 and p95 over at least 20 runs for browser verifier measurements.
 - If the target is missed, keep the measured number and narrow the claim. Do not hide it behind a spinner.
-- Per-PR CI records size budgets for the browser demo, routine `VIEX` fixtures, and browser verifier WASM.
+- Per-PR CI records size budgets for the browser demo, routine `VIEX` fixtures, browser verifier WASM, and CommitLLM verifier-key fixture.
 - Nightly CI uploads browser verifier timing and artifact-size JSON under `reports/perf/`.
 
 ## Current browser-WASM fixture measurement
