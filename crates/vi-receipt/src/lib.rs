@@ -6,7 +6,7 @@
 // RFC-0003 parsing failures must flow through the shared `ViError` taxonomy.
 #![allow(clippy::result_large_err)]
 
-use vi_errors::{IdentityFields, ViError};
+use vi_errors::{IdentityFields, PhaseId, ViError};
 
 /// Supported v1 binary-envelope version.
 pub const ENVELOPE_VERSION: u8 = 1;
@@ -16,6 +16,9 @@ pub const KEYGEN_SCHEMA_VERSION: u16 = 1;
 
 /// Supported v1 receipt binding schema version.
 pub const RECEIPT_SCHEMA_VERSION: u16 = 1;
+
+/// Supported v1 audit binding schema version.
+pub const AUDIT_SCHEMA_VERSION: u16 = 1;
 
 /// Reserved v1 flags value.
 pub const ENVELOPE_FLAGS: u8 = 0;
@@ -174,6 +177,125 @@ impl ReceiptBindingHeader {
     #[must_use]
     pub fn identity_fields(&self) -> IdentityFields {
         IdentityFields::new(&self.model_id, &self.checkpoint_hash, &self.commitllm_pin)
+    }
+}
+
+/// Verifier-requested audit tier encoded in `VIAU` binding headers.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AuditTier {
+    /// Receipt-only verification; no audit opening required.
+    ReceiptOnly = 0,
+    /// Routine verifier challenge.
+    Routine = 1,
+    /// Deep verifier challenge.
+    Deep = 2,
+    /// Full verifier challenge.
+    Full = 3,
+}
+
+impl AuditTier {
+    /// Stable byte value used in `VIAU` binding headers.
+    #[must_use]
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// Stable tier name used by public APIs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReceiptOnly => "receipt-only",
+            Self::Routine => "routine",
+            Self::Deep => "deep",
+            Self::Full => "full",
+        }
+    }
+}
+
+impl TryFrom<u8> for AuditTier {
+    type Error = ViError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::ReceiptOnly),
+            1 => Ok(Self::Routine),
+            2 => Ok(Self::Deep),
+            3 => Ok(Self::Full),
+            _ => Err(ViError::UnsupportedTier {
+                requested: value.to_string(),
+                reason: "unknown audit tier byte".to_owned(),
+            }),
+        }
+    }
+}
+
+impl std::fmt::Display for AuditTier {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Verifier challenge tuple that a `VIAU` audit opening must bind to.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AuditChallenge {
+    /// Requested audit tier.
+    pub tier: AuditTier,
+    /// Token position challenged by the verifier.
+    pub token_index: u64,
+    /// Layer indices opened by the provider for this challenge.
+    pub layer_indices: Vec<u32>,
+}
+
+impl AuditChallenge {
+    /// Construct an audit challenge tuple.
+    #[must_use]
+    pub fn new(tier: AuditTier, token_index: u64, layer_indices: impl Into<Vec<u32>>) -> Self {
+        Self {
+            tier,
+            token_index,
+            layer_indices: layer_indices.into(),
+        }
+    }
+}
+
+/// Audit binding header carried inside `VIAU` payloads.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AuditBindingHeader {
+    /// Audit binding schema version.
+    pub audit_schema_version: u16,
+    /// Hash of the `VIRC` receipt this audit opening belongs to.
+    pub receipt_hash: String,
+    /// Requested audit tier.
+    pub tier: AuditTier,
+    /// Token position challenged by the verifier.
+    pub token_index: u64,
+    /// Layer indices opened by the provider for this challenge.
+    pub layer_indices: Vec<u32>,
+}
+
+impl AuditBindingHeader {
+    /// Construct a v1 audit binding header.
+    #[must_use]
+    pub fn new(
+        receipt_hash: impl Into<String>,
+        tier: AuditTier,
+        token_index: u64,
+        layer_indices: impl Into<Vec<u32>>,
+    ) -> Self {
+        Self {
+            audit_schema_version: AUDIT_SCHEMA_VERSION,
+            receipt_hash: receipt_hash.into(),
+            tier,
+            token_index,
+            layer_indices: layer_indices.into(),
+        }
+    }
+
+    /// Challenge tuple bound by this audit opening.
+    #[must_use]
+    pub fn challenge(&self) -> AuditChallenge {
+        AuditChallenge::new(self.tier, self.token_index, self.layer_indices.clone())
     }
 }
 
@@ -454,6 +576,155 @@ pub fn check_receipt_identity(
     }
 }
 
+/// Encode a v1 `VIAU` audit binding header.
+///
+/// Layout:
+/// `[body_len:u32le][body_crc32c:u32le][audit_schema_version:u16le]`
+/// `[tier:u8][token_index:u64le][layer_count:u16le][layer_index:u32le]*`
+/// followed by `receipt_hash` as `[len:u16le][utf8 bytes]`.
+pub fn encode_audit_binding_header(header: &AuditBindingHeader) -> Result<Vec<u8>, ViError> {
+    validate_audit_schema_version(header.audit_schema_version)?;
+    let layer_count = u16::try_from(header.layer_indices.len()).map_err(|_| ViError::Input {
+        arg: "layer_indices".to_owned(),
+        reason: "layer index count exceeds u16 length prefix".to_owned(),
+        detail: None,
+    })?;
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&header.audit_schema_version.to_le_bytes());
+    body.push(header.tier.as_u8());
+    body.extend_from_slice(&header.token_index.to_le_bytes());
+    body.extend_from_slice(&layer_count.to_le_bytes());
+    for layer_index in &header.layer_indices {
+        body.extend_from_slice(&layer_index.to_le_bytes());
+    }
+    write_string(&mut body, "receipt_hash", &header.receipt_hash)?;
+
+    let body_len = u32::try_from(body.len()).map_err(|_| ViError::Input {
+        arg: "audit_binding_header".to_owned(),
+        reason: "header body exceeds u32 length".to_owned(),
+        detail: None,
+    })?;
+    let crc = crc32c(&body);
+
+    let mut bytes = Vec::with_capacity(KEY_BINDING_PREFIX_LEN + body.len());
+    bytes.extend_from_slice(&body_len.to_le_bytes());
+    bytes.extend_from_slice(&crc.to_le_bytes());
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
+}
+
+/// Decode a v1 `VIAU` audit binding header and return its consumed byte length.
+pub fn decode_audit_binding_header(bytes: &[u8]) -> Result<(AuditBindingHeader, usize), ViError> {
+    if bytes.len() < KEY_BINDING_PREFIX_LEN {
+        return Err(corrupt_envelope(
+            "VIAU",
+            bytes.len(),
+            "binding header shorter than 8-byte prefix",
+        ));
+    }
+
+    let body_len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let expected_crc = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    let body_end = KEY_BINDING_PREFIX_LEN
+        .checked_add(body_len)
+        .ok_or_else(|| {
+            corrupt_envelope(
+                "VIAU",
+                KEY_BINDING_PREFIX_LEN,
+                "binding header length overflows",
+            )
+        })?;
+
+    if body_end > bytes.len() {
+        return Err(corrupt_envelope(
+            "VIAU",
+            KEY_BINDING_PREFIX_LEN,
+            "binding header length overruns payload",
+        ));
+    }
+
+    let body = &bytes[KEY_BINDING_PREFIX_LEN..body_end];
+    let actual_crc = crc32c(body);
+    if actual_crc != expected_crc {
+        return Err(corrupt_envelope("VIAU", 4, "binding_crc32 mismatch"));
+    }
+
+    let mut reader = BindingReader::new("VIAU", body);
+    let audit_schema_version = reader.read_u16()?;
+    validate_audit_schema_version(audit_schema_version)?;
+    let tier = AuditTier::try_from(reader.read_u8()?)?;
+    let token_index = reader.read_u64()?;
+    let layer_count = usize::from(reader.read_u16()?);
+    let mut layer_indices = Vec::with_capacity(layer_count);
+    for _ in 0..layer_count {
+        layer_indices.push(reader.read_u32()?);
+    }
+    let receipt_hash = reader.read_string()?;
+    reader.finish()?;
+
+    Ok((
+        AuditBindingHeader {
+            audit_schema_version,
+            receipt_hash,
+            tier,
+            token_index,
+            layer_indices,
+        },
+        body_end,
+    ))
+}
+
+/// Prefix opaque `CommitLLM` audit bytes with an audit binding header.
+pub fn encode_viau_payload(
+    header: &AuditBindingHeader,
+    commitllm_audit: &[u8],
+) -> Result<Vec<u8>, ViError> {
+    let mut payload = encode_audit_binding_header(header)?;
+    payload.extend_from_slice(commitllm_audit);
+    Ok(payload)
+}
+
+/// Split a `VIAU` payload into its binding header and opaque `CommitLLM` audit bytes.
+pub fn decode_viau_payload(payload: &[u8]) -> Result<(AuditBindingHeader, &[u8]), ViError> {
+    let (header, consumed) = decode_audit_binding_header(payload)?;
+    Ok((header, &payload[consumed..]))
+}
+
+/// Ensure an audit opening belongs to the receipt currently under verification.
+pub fn check_audit_receipt_hash(
+    audit: &AuditBindingHeader,
+    expected_receipt_hash: &str,
+) -> Result<(), ViError> {
+    if audit.receipt_hash == expected_receipt_hash {
+        Ok(())
+    } else {
+        Err(ViError::HashMismatch {
+            expected: expected_receipt_hash.to_owned(),
+            actual: audit.receipt_hash.clone(),
+        })
+    }
+}
+
+/// Ensure an audit opening binds to the verifier-requested challenge tuple.
+pub fn check_audit_challenge(
+    audit: &AuditBindingHeader,
+    expected: &AuditChallenge,
+) -> Result<(), ViError> {
+    let actual = audit.challenge();
+
+    if &actual == expected {
+        Ok(())
+    } else {
+        Err(ViError::VerificationFailed {
+            phase: PhaseId::KvProvenance,
+            measured: None,
+            tolerance: None,
+            extra: Some(challenge_mismatch_detail(expected, &actual)),
+        })
+    }
+}
+
 /// Prefix opaque `CommitLLM` key bytes with a key binding header.
 pub fn encode_viky_payload(
     header: &KeyBindingHeader,
@@ -517,6 +788,37 @@ fn validate_receipt_schema_version(version: u16) -> Result<(), ViError> {
     }
 }
 
+fn validate_audit_schema_version(version: u16) -> Result<(), ViError> {
+    if version == AUDIT_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(ViError::UnknownVersion {
+            envelope: "VIAU",
+            field: "audit_schema_version",
+            value: u32::from(version),
+            supported: vec![u32::from(AUDIT_SCHEMA_VERSION)],
+        })
+    }
+}
+
+fn challenge_mismatch_detail(
+    expected: &AuditChallenge,
+    actual: &AuditChallenge,
+) -> serde_json::Value {
+    serde_json::json!({
+        "expected": audit_challenge_detail(expected),
+        "actual": audit_challenge_detail(actual),
+    })
+}
+
+fn audit_challenge_detail(challenge: &AuditChallenge) -> serde_json::Value {
+    serde_json::json!({
+        "tier": challenge.tier.as_str(),
+        "token_index": challenge.token_index,
+        "layer_indices": challenge.layer_indices,
+    })
+}
+
 fn write_string(bytes: &mut Vec<u8>, field: &str, value: &str) -> Result<(), ViError> {
     let len = u16::try_from(value.len()).map_err(|_| ViError::Input {
         arg: field.to_owned(),
@@ -550,6 +852,16 @@ impl<'a> BindingReader<'a> {
     fn read_u16(&mut self) -> Result<u16, ViError> {
         let bytes = self.read_exact(2, "u16 field overruns binding header")?;
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn read_u8(&mut self) -> Result<u8, ViError> {
+        let bytes = self.read_exact(1, "u8 field overruns binding header")?;
+        Ok(bytes[0])
+    }
+
+    fn read_u32(&mut self) -> Result<u32, ViError> {
+        let bytes = self.read_exact(4, "u32 field overruns binding header")?;
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
     fn read_u64(&mut self) -> Result<u64, ViError> {
@@ -614,19 +926,31 @@ fn corrupt_envelope(envelope: &'static str, offset: usize, reason: &'static str)
 #[cfg(test)]
 mod tests {
     use super::{
-        check_receipt_identity, decode, decode_key_binding_header, decode_viky_payload,
-        decode_virc_payload, encode, encode_key_binding_header, encode_receipt_binding_header,
-        encode_viky_payload, encode_virc_payload, Envelope, KeyBindingHeader, Magic,
-        ReceiptBindingHeader, ENVELOPE_FLAGS, ENVELOPE_VERSION, HEADER_LEN, KEYGEN_SCHEMA_VERSION,
-        RECEIPT_SCHEMA_VERSION,
+        check_audit_challenge, check_audit_receipt_hash, check_receipt_identity, decode,
+        decode_key_binding_header, decode_viau_payload, decode_viky_payload, decode_virc_payload,
+        encode, encode_audit_binding_header, encode_key_binding_header,
+        encode_receipt_binding_header, encode_viau_payload, encode_viky_payload,
+        encode_virc_payload, AuditBindingHeader, AuditChallenge, AuditTier, Envelope,
+        KeyBindingHeader, Magic, ReceiptBindingHeader, AUDIT_SCHEMA_VERSION, ENVELOPE_FLAGS,
+        ENVELOPE_VERSION, HEADER_LEN, KEYGEN_SCHEMA_VERSION, RECEIPT_SCHEMA_VERSION,
     };
     use proptest::prelude::{any, prop_oneof, Just, ProptestConfig};
     use proptest::string::string_regex;
     use proptest::{collection, proptest};
-    use vi_errors::{IdentityFields, ViError};
+    use serde_json::json;
+    use vi_errors::{IdentityFields, PhaseId, ViError};
 
     fn magic_strategy() -> impl proptest::strategy::Strategy<Value = Magic> {
         prop_oneof![Just(Magic::VIKY), Just(Magic::VIRC), Just(Magic::VIAU)]
+    }
+
+    fn audit_tier_strategy() -> impl proptest::strategy::Strategy<Value = AuditTier> {
+        prop_oneof![
+            Just(AuditTier::ReceiptOnly),
+            Just(AuditTier::Routine),
+            Just(AuditTier::Deep),
+            Just(AuditTier::Full),
+        ]
     }
 
     proptest! {
@@ -668,6 +992,27 @@ mod tests {
 
             proptest::prop_assert_eq!(decoded, header);
             proptest::prop_assert_eq!(receipt, receipt_bytes.as_slice());
+        }
+
+        #[test]
+        fn audit_binding_header_round_trips(
+            receipt_hash in string_regex("sha256:[a-f0-9]{8,64}").expect("valid receipt hash regex"),
+            tier in audit_tier_strategy(),
+            token_index in any::<u64>(),
+            layer_indices in collection::vec(any::<u32>(), 0..64),
+            audit_bytes in collection::vec(any::<u8>(), 0..1024),
+        ) {
+            let header = AuditBindingHeader::new(
+                receipt_hash,
+                tier,
+                token_index,
+                layer_indices,
+            );
+            let payload = encode_viau_payload(&header, &audit_bytes)?;
+            let (decoded, audit) = decode_viau_payload(&payload)?;
+
+            proptest::prop_assert_eq!(decoded, header);
+            proptest::prop_assert_eq!(audit, audit_bytes.as_slice());
         }
     }
 
@@ -925,6 +1270,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn audit_receipt_hash_mismatch_is_rejected() {
+        let header = realistic_audit_header();
+        let error = check_audit_receipt_hash(&header, "sha256:expected-receipt")
+            .expect_err("receipt hash mismatch should fail");
+
+        assert_eq!(
+            error,
+            ViError::HashMismatch {
+                expected: "sha256:expected-receipt".to_owned(),
+                actual: "sha256:receipt".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn audit_challenge_mismatch_is_rejected() {
+        let header = realistic_audit_header();
+        let expected = AuditChallenge::new(AuditTier::Routine, 8, vec![0, 4, 8]);
+        let error =
+            check_audit_challenge(&header, &expected).expect_err("challenge mismatch should fail");
+
+        assert_eq!(
+            error,
+            ViError::VerificationFailed {
+                phase: PhaseId::KvProvenance,
+                measured: None,
+                tolerance: None,
+                extra: Some(json!({
+                    "expected": {
+                        "tier": "routine",
+                        "token_index": 8,
+                        "layer_indices": [0, 4, 8],
+                    },
+                    "actual": {
+                        "tier": "deep",
+                        "token_index": 12,
+                        "layer_indices": [1, 7, 13],
+                    },
+                })),
+            }
+        );
+    }
+
+    #[test]
+    fn audit_binding_checks_pass_for_matching_request() {
+        let header = realistic_audit_header();
+        let expected = AuditChallenge::new(AuditTier::Deep, 12, vec![1, 7, 13]);
+
+        check_audit_receipt_hash(&header, "sha256:receipt")
+            .expect("matching receipt hash should pass");
+        check_audit_challenge(&header, &expected).expect("matching challenge should pass");
+    }
+
+    #[test]
+    fn audit_binding_unknown_schema_version_is_unknown_version() {
+        let header = AuditBindingHeader {
+            audit_schema_version: 2,
+            ..realistic_audit_header()
+        };
+        let error = encode_audit_binding_header(&header).expect_err("unknown schema should fail");
+        assert_eq!(
+            error,
+            ViError::UnknownVersion {
+                envelope: "VIAU",
+                field: "audit_schema_version",
+                value: 2,
+                supported: vec![u32::from(AUDIT_SCHEMA_VERSION)],
+            }
+        );
+    }
+
     fn realistic_key_header() -> KeyBindingHeader {
         KeyBindingHeader::new(
             "llama-3.1-8b-w8a8",
@@ -944,5 +1361,9 @@ mod tests {
             "sha256:answer",
             32,
         )
+    }
+
+    fn realistic_audit_header() -> AuditBindingHeader {
+        AuditBindingHeader::new("sha256:receipt", AuditTier::Deep, 12, vec![1, 7, 13])
     }
 }

@@ -777,6 +777,7 @@ dependencies = [
  "crc",
  "proptest",
  "serde",
+ "serde_json",
  "vi-errors",
 ]
 
