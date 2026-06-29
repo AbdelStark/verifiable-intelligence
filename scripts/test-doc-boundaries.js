@@ -25,6 +25,7 @@ const buyerGuide = 'docs/guides/buyer-proof-guide.md';
 const providerGuide = 'docs/guides/provider-integration-guide.md';
 const contributingGuide = 'CONTRIBUTING.md';
 const securityGuide = 'SECURITY.md';
+const corridorGuide = 'docs/measurements/corridor.md';
 
 assertIncludes('README.md', './docs/guides/buyer-proof-guide.md', 'buyer guide link');
 assertIncludes('README.md', './docs/guides/provider-integration-guide.md', 'provider guide link');
@@ -74,5 +75,16 @@ assertMatches(securityGuide, /3 business days/i, 'security acknowledgement SLO')
 assertMatches(securityGuide, /7 calendar days/i, 'security triage SLO');
 assertMatches(securityGuide, /unauthorized token resale/i, 'security lawful-use boundary');
 assertIncludes('docs/spec/06-security.md', '../../SECURITY.md', 'security policy link');
+
+for (const term of [
+  'Corridor Measurement Template',
+  'scripts/corridor/measure.py',
+  'Reproducibility Tolerance',
+  '0.0001',
+  'reports/corridor/',
+  'RFC-0010',
+]) {
+  assertIncludes(corridorGuide, term, `corridor template ${term}`);
+}
 
 console.log('Documentation boundary checks passed');
