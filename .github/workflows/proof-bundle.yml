@@ -5,6 +5,7 @@ on:
     paths:
       - "fixtures/viex/**"
       - "broker/**"
+      - ".github/workflows/**"
       - "docs/**"
       - "README.md"
       - "schemas/**"
@@ -17,6 +18,7 @@ on:
     paths:
       - "fixtures/viex/**"
       - "broker/**"
+      - ".github/workflows/**"
       - "docs/**"
       - "README.md"
       - "schemas/**"

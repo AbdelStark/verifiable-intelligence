@@ -32,6 +32,8 @@ The v1 live reference model is `llama-3.1-8b-w8a8` with CommitLLM profile `llama
 
 ## Try the demo prototype
 
+Hosted static demo: <https://abdelstark.github.io/verifiable-intelligence/>
+
 Open [`demo/index.html`](./demo/index.html) in a browser. It is a static prototype with simulated provider responses and proof objects. It is meant to make the buyer flow legible before the live CommitLLM backend lands.
 
 Browser smoke tests:
@@ -67,6 +69,7 @@ Guides:
 
 - [Buyer proof guide](./docs/guides/buyer-proof-guide.md)
 - [Provider integration guide](./docs/guides/provider-integration-guide.md)
+- [v0.1.0 pivot demo release notes](./docs/release/v0.1.0-pivot-demo.md)
 
 ## License
 

@@ -49,6 +49,23 @@ test.describe('static proof-market demo', () => {
     await expect(page.getByTestId('bundle')).toContainText('"answer_hash"');
   });
 
+  test('release comprehension copy stays visible across happy and red paths', async ({ page }) => {
+    await openDemo(page);
+    await expect(page.getByText('open-weight only')).toBeVisible();
+    await expect(page.getByText('simulated fixtures')).toBeVisible();
+    await expect(page.getByText(/execution integrity/i)).toBeVisible();
+    await expect(page.getByText(/unauthorized token resale/i)).toBeVisible();
+
+    await runVerification(page);
+    await expect.poll(() => verdict(page)).toBe('PASS');
+
+    await page.getByTestId('mode-model_swap').click();
+    await runVerification(page);
+    await expect.poll(() => verdict(page)).toBe('FAIL');
+    await expect(page.getByText('open-weight only')).toBeVisible();
+    await expect(page.getByText('simulated fixtures')).toBeVisible();
+  });
+
   for (const mode of ['model_swap', 'prompt_mismatch', 'answer_rewrite', 'receipt_tamper', 'expired_quote']) {
     test(`${mode} red path does not pass`, async ({ page }) => {
       await openDemo(page);
