@@ -17,7 +17,7 @@
     "test:workflows": "scripts/ci/test-actionlint.sh",
     "test:error-envelopes": "node scripts/validate-error-envelopes.js",
     "bench:browser": "node scripts/ci/collect-browser-perf.js",
-    "test:schema": "node scripts/validate-viex-fixtures.js",
+    "test:schema": "node scripts/validate-schema-fixtures.js --self-test && node scripts/validate-schema-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
     "test:broker": "node scripts/test-broker-api.js",
     "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker && npm run test:provider && npm run test:docs && npm run test:release && npm run test:pin && npm run test:changelog-pin && npm run test:commitllm-rename-watch"
