@@ -1460,6 +1460,7 @@ dependencies = [
 name = "vi-client"
 version = "0.0.0"
 dependencies = [
+ "reqwest",
  "vi-errors",
  "vi-receipt",
 ]
