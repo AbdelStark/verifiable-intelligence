@@ -667,6 +667,7 @@ mod tests {
         time::Duration,
     };
 
+    use mockito::Matcher;
     use reqwest::{header::AUTHORIZATION, Url};
     use serde_json::Value;
     use vi_errors::ViError;
@@ -732,6 +733,160 @@ mod tests {
             .post_chat_completions("trace", "{}")
             .expect_err("plain HTTP server should fail TLS");
         handle.join().expect("server joins");
+
+        assert_eq!(error.category(), "network");
+    }
+
+    #[test]
+    fn mockito_happy_chat_returns_text_and_receipt() {
+        let mut server = mockito::Server::new();
+        let body = multipart_body(&[
+            (
+                "application/json",
+                br#"{"choices":[{"message":{"content":"hello mock"}}]}"#.as_slice(),
+            ),
+            (
+                "application/vnd.verifiable-intelligence.receipt+binary",
+                b"VIRC-mock-receipt".as_slice(),
+            ),
+        ]);
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("content-type", "application/json")
+            .match_header("x-verifiable-receipt", "1")
+            .match_header("x-verifiable-intelligence-trace", "trace-chat")
+            .match_header("authorization", "Bearer secret-token")
+            .match_body(Matcher::Json(serde_json::json!({"messages": []})))
+            .with_status(200)
+            .with_header("content-type", "multipart/mixed; boundary=test-boundary")
+            .with_body(body)
+            .create();
+        let client = http_test_client(&server.url(), Some("secret-token".to_owned()));
+
+        let response = client
+            .post_chat_completions("trace-chat", r#"{"messages":[]}"#)
+            .expect("chat request should succeed");
+        let parsed = parse_chat_response(&response).expect("multipart response parses");
+        let headers = client.chat_headers("trace-chat").expect("headers build");
+
+        mock.assert();
+        assert_eq!(parsed.text, "hello mock");
+        assert_eq!(
+            parsed.receipt_bytes.as_deref(),
+            Some(b"VIRC-mock-receipt".as_slice())
+        );
+        assert!(!format!("{headers:?}").contains("secret-token"));
+    }
+
+    #[test]
+    fn mockito_happy_audit_returns_viau_bytes() {
+        let mut server = mockito::Server::new();
+        let audit_bytes = b"VIAU\x01\x00mock-audit".to_vec();
+        let mock = server
+            .mock("POST", "/v1/audit")
+            .match_header("content-type", "application/json")
+            .match_header("x-verifiable-intelligence-trace", "trace-audit")
+            .match_body(Matcher::Json(serde_json::json!({
+                "receipt_hash": "sha256:receipt",
+                "tier": "routine",
+                "challenge": {
+                    "token_index": 7,
+                    "layer_indices": [0, 2, 4],
+                },
+            })))
+            .with_status(200)
+            .with_header(
+                "content-type",
+                "application/vnd.verifiable-intelligence.audit+binary",
+            )
+            .with_body(audit_bytes.clone())
+            .create();
+        let client = http_test_client(&server.url(), None);
+        let request = AuditRequest::new(
+            "sha256:receipt",
+            AuditChallenge::new(AuditTier::Routine, 7, vec![0, 2, 4]),
+        );
+
+        let response = client
+            .post_audit("trace-audit", &request)
+            .expect("audit request should succeed");
+
+        mock.assert();
+        assert_eq!(response.body, audit_bytes);
+        assert_eq!(
+            response.content_type.as_deref(),
+            Some("application/vnd.verifiable-intelligence.audit+binary")
+        );
+    }
+
+    #[test]
+    fn mockito_chat_missing_receipt_is_receipt_missing() {
+        let mut server = mockito::Server::new();
+        let body = multipart_body(&[(
+            "application/json",
+            br#"{"choices":[{"message":{"content":"hello"}}]}"#.as_slice(),
+        )]);
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("x-verifiable-receipt", "1")
+            .with_status(200)
+            .with_header("content-type", "multipart/mixed; boundary=test-boundary")
+            .with_body(body)
+            .create();
+        let client = http_test_client(&server.url(), None);
+
+        let response = client
+            .post_chat_completions("trace-chat", "{}")
+            .expect("chat request should succeed");
+        let error = parse_chat_response(&response).expect_err("receipt should be required");
+
+        mock.assert();
+        assert_eq!(
+            error,
+            ViError::ReceiptMissing {
+                endpoint: format!("{}/v1/chat/completions", server.url()),
+                content_type: "multipart/mixed; boundary=test-boundary".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mockito_degraded_prover_warning_returns_text_without_receipt() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("x-verifiable-receipt", "1")
+            .with_status(503)
+            .with_header("content-type", "application/json")
+            .with_header("warning", r#"199 - "Receipt unavailable""#)
+            .with_body(br#"{"choices":[{"message":{"content":"degraded"}}]}"#)
+            .create();
+        let client = http_test_client(&server.url(), None);
+
+        let response = client
+            .post_chat_completions("trace-chat", "{}")
+            .expect("warning response should not be a hard network error");
+        let parsed = parse_chat_response(&response).expect("warning JSON parses");
+
+        mock.assert();
+        assert_eq!(response.status, 503);
+        assert_eq!(parsed.text, "degraded");
+        assert_eq!(parsed.receipt_bytes, None);
+        assert_eq!(
+            parsed.warning.as_deref(),
+            Some(r#"199 - "Receipt unavailable""#)
+        );
+    }
+
+    #[test]
+    fn mockito_plain_http_server_rejects_https_tls() {
+        let server = mockito::Server::new();
+        let endpoint = server.url().replacen("http://", "https://", 1);
+        let client = ChatClient::new(&endpoint, None).expect("https URL should be accepted");
+
+        let error = client
+            .post_chat_completions("trace-chat", "{}")
+            .expect_err("plain HTTP mock server should fail TLS");
 
         assert_eq!(error.category(), "network");
     }
@@ -977,6 +1132,18 @@ mod tests {
     }
 
     fn multipart_response(parts: &[(&str, &[u8])]) -> ChatResponse {
+        let body = multipart_body(parts);
+
+        ChatResponse {
+            status: 200,
+            endpoint: "https://provider.example/v1/chat/completions".to_owned(),
+            content_type: Some("multipart/mixed; boundary=test-boundary".to_owned()),
+            warning: None,
+            body,
+        }
+    }
+
+    fn multipart_body(parts: &[(&str, &[u8])]) -> Vec<u8> {
         let mut body = Vec::new();
         for (content_type, part_body) in parts {
             body.extend_from_slice(b"--test-boundary\r\nContent-Type: ");
@@ -986,14 +1153,7 @@ mod tests {
             body.extend_from_slice(b"\r\n");
         }
         body.extend_from_slice(b"--test-boundary--\r\n");
-
-        ChatResponse {
-            status: 200,
-            endpoint: "https://provider.example/v1/chat/completions".to_owned(),
-            content_type: Some("multipart/mixed; boundary=test-boundary".to_owned()),
-            warning: None,
-            body,
-        }
+        body
     }
 
     fn healthz_body(commitllm_pin: &str) -> Vec<u8> {
