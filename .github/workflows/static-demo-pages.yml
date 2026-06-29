@@ -1,0 +1,50 @@
+name: Static Demo Pages
+
+on:
+  push:
+    tags:
+      - "demo-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Prepare static demo artifact
+        run: |
+          mkdir -p public
+          cp demo/index.html public/index.html
+          touch public/.nojekyll
+          cat > public/release.json <<EOF
+          {
+            "source_ref": "${GITHUB_REF_NAME}",
+            "source_sha": "${GITHUB_SHA}",
+            "artifact": "demo/index.html",
+            "live_provider_calls": false,
+            "backend": "simulated fixtures"
+          }
+          EOF
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
