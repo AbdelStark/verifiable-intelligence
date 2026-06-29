@@ -37,6 +37,7 @@ const corridorGuide = 'docs/measurements/corridor.md';
 const ciGuide = 'docs/ci/README.md';
 const redBuildGuide = 'docs/ci/red-build.md';
 const gpuRunnerGuide = 'docs/ci/gpu-runners.md';
+const codeOfConduct = 'CODE_OF_CONDUCT.md';
 
 assertIncludes('README.md', './docs/guides/buyer-proof-guide.md', 'buyer guide link');
 assertIncludes('README.md', './docs/guides/provider-integration-guide.md', 'provider guide link');
@@ -128,5 +129,16 @@ for (const term of ['Red Build Runbook', 'Local Reproduction Map', 'gh run view'
 for (const term of ['GPU Runner Setup', 'self-hosted', 'vi-corridor', 'cost', 'no workflow']) {
   assertIncludes(gpuRunnerGuide, term, `gpu runner guide ${term}`);
 }
+
+for (const term of [
+  'Code of Conduct',
+  'Our Pledge',
+  'Enforcement',
+  'Contributor Covenant, version 2.1',
+]) {
+  assertIncludes(codeOfConduct, term, `code of conduct ${term}`);
+}
+
+assertIncludes(contributingGuide, './CODE_OF_CONDUCT.md', 'code of conduct link');
 
 console.log('Documentation boundary checks passed');
