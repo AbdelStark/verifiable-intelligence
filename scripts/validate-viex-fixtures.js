@@ -22,6 +22,14 @@ const cliContracts = [
       'fixtures/cli/chat-no-receipt.json',
     ],
   },
+  {
+    label: 'verify report',
+    schema: 'schemas/verify-report.schema.json',
+    fixtures: [
+      'crates/vi-cli/tests/snapshots/output/verify.json',
+      'fixtures/cli/verify-fail.json',
+    ],
+  },
 ];
 
 const ajv = new Ajv({ allErrors: true });

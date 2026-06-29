@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "subcommand": "verify",
+  "tier": "routine",
+  "verdict": "fail",
+  "phases": [
+    "embedding_merkle",
+    "shell_freivalds",
+    "bridge_replay",
+    "attention_corridor",
+    "kv_provenance",
+    "lm_head",
+    "decode_policy"
+  ],
+  "checks_run": 7,
+  "checks_passed": 6,
+  "warnings": ["bridge_replay exceeded tolerance"],
+  "elapsed_ms": 12,
+  "phase_details": [
+    {
+      "phase": "bridge_replay",
+      "status": "fail",
+      "elapsed_ms": 5,
+      "detail": {
+        "measured": 47,
+        "tolerance": 10
+      }
+    }
+  ]
+}
