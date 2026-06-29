@@ -8,12 +8,24 @@ const manifestPath = path.join(fixtureDir, 'manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const schemaPath = path.resolve(fixtureDir, manifest.schema);
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
-const keygenSchemaPath = path.join(root, 'schemas', 'keygen-output.schema.json');
-const keygenFixturePath = path.join(root, 'crates', 'vi-cli', 'tests', 'snapshots', 'output', 'keygen.json');
+const cliContracts = [
+  {
+    label: 'keygen output',
+    schema: 'schemas/keygen-output.schema.json',
+    fixtures: ['crates/vi-cli/tests/snapshots/output/keygen.json'],
+  },
+  {
+    label: 'chat output',
+    schema: 'schemas/chat-output.schema.json',
+    fixtures: [
+      'crates/vi-cli/tests/snapshots/output/chat.json',
+      'fixtures/cli/chat-no-receipt.json',
+    ],
+  },
+];
 
 const ajv = new Ajv({ allErrors: true });
 const validate = ajv.compile(schema);
-const validateKeygen = ajv.compile(JSON.parse(fs.readFileSync(keygenSchemaPath, 'utf8')));
 const rawFieldNames = new Set(['prompt', 'raw_prompt', 'messages', 'answer', 'raw_answer', 'text']);
 
 function collectRawFields(value, trail = []) {
@@ -84,11 +96,16 @@ for (const fixture of manifest.fixtures) {
   }
 }
 
-const keygenOutput = JSON.parse(fs.readFileSync(keygenFixturePath, 'utf8'));
-if (!validateKeygen(keygenOutput)) {
-  failures.push(
-    `${path.relative(root, keygenFixturePath)}: schema errors: ${ajv.errorsText(validateKeygen.errors)}`
-  );
+for (const contract of cliContracts) {
+  const contractSchemaPath = path.join(root, contract.schema);
+  const validateCliFixture = ajv.compile(JSON.parse(fs.readFileSync(contractSchemaPath, 'utf8')));
+  for (const fixture of contract.fixtures) {
+    const fixturePath = path.join(root, fixture);
+    const value = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+    if (!validateCliFixture(value)) {
+      failures.push(`${fixture}: schema errors: ${ajv.errorsText(validateCliFixture.errors)}`);
+    }
+  }
 }
 
 if (failures.length) {
@@ -97,6 +114,8 @@ if (failures.length) {
 }
 
 console.log(`Validated ${manifest.fixtures.length} VIEX fixtures against ${path.relative(root, schemaPath)}`);
-console.log(
-  `Validated keygen output fixture against ${path.relative(root, keygenSchemaPath)}`
-);
+for (const contract of cliContracts) {
+  console.log(
+    `Validated ${contract.fixtures.length} ${contract.label} fixture(s) against ${contract.schema}`
+  );
+}

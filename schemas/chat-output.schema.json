@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verifiable-intelligence.local/schemas/chat-output.schema.json",
+  "title": "vi chat output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subcommand",
+    "endpoint",
+    "status",
+    "text",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of the CLI JSON output contract.",
+      "const": 1
+    },
+    "subcommand": {
+      "description": "CLI subcommand that produced this object.",
+      "const": "chat"
+    },
+    "endpoint": {
+      "description": "Provider or broker endpoint used for the chat request.",
+      "type": "string",
+      "pattern": "^https?://.+"
+    },
+    "status": {
+      "description": "HTTP status code returned by the provider or broker.",
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "text": {
+      "description": "Assistant text returned by the provider.",
+      "type": "string"
+    },
+    "receipt": {
+      "description": "Receipt artifact written by `vi chat`; absent for `--no-receipt`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes"],
+      "properties": {
+        "path": {
+          "description": "Path where the VIRC receipt envelope was written.",
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "description": "Size of the written receipt envelope in bytes.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "warnings": {
+      "description": "Non-fatal warnings emitted during chat or receipt parsing.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
