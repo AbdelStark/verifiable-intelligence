@@ -5,6 +5,8 @@ on:
     paths:
       - "fixtures/viex/**"
       - "broker/**"
+      - "docs/**"
+      - "README.md"
       - "schemas/**"
       - "scripts/**"
       - "package.json"
@@ -15,6 +17,8 @@ on:
     paths:
       - "fixtures/viex/**"
       - "broker/**"
+      - "docs/**"
+      - "README.md"
       - "schemas/**"
       - "scripts/**"
       - "package.json"

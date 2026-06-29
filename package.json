@@ -6,10 +6,11 @@
     "build:wasm": "wasm-pack build verifier/wasm --target web --release --out-dir pkg --out-name vi_commitllm_verifier && rm -f verifier/wasm/pkg/.gitignore",
     "test:demo": "playwright test",
     "test:wasm": "playwright test tests/commitllm-wasm.spec.js",
+    "test:docs": "node scripts/test-doc-boundaries.js",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
     "test:broker": "node scripts/test-broker-api.js",
-    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker"
+    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker && npm run test:docs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
