@@ -1,5 +1,15 @@
 {
   "schema": "../../schemas/viex.schema.json",
+  "reference": {
+    "model_id": "llama-3.1-8b-w8a8",
+    "profile": "llama-w8a8-audited",
+    "commitllm_pin": "25541e83",
+    "checkpoint_hash": "sha256:a41e82812a261708ec253803904d482a00e8d06d9f6d119418f2d9dc3edafeef",
+    "checkpoint_hash_note": "Fixture-only descriptor hash. The live provider build must replace it with the canonical hash of the resolved weight snapshot.",
+    "upstream_model": "neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w8a8",
+    "resolved_hf_model": "RedHatAI/Meta-Llama-3.1-8B-Instruct-quantized.w8a8",
+    "resolved_hf_revision": "fc2669564045fda605eac0db50e430d24d9aece1"
+  },
   "fixtures": [
     {
       "file": "happy-path.json",

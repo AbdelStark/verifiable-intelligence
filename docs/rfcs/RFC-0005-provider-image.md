@@ -62,7 +62,7 @@ COPY --from=builder /opt/python /opt/python
 COPY --from=weights /weights /weights
 COPY provider/entrypoint.sh /entrypoint.sh
 COPY provider/healthz.py /healthz.py
-ENV MODEL_DIR=/weights MODEL_ID=llama-3.2-1b-w8a8
+ENV MODEL_DIR=/weights MODEL_ID=llama-3.1-8b-w8a8
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]
 ```
@@ -114,7 +114,7 @@ CommitLLM upstream maintains a vLLM patch set. We apply it during the builder st
 ```json
 {
   "status": "ok",
-  "model_id": "llama-3.2-1b-w8a8",
+  "model_id": "llama-3.1-8b-w8a8",
   "checkpoint_hash": "sha256:...",
   "commitllm_pin": "<short-sha>",
   "uptime_s": 412

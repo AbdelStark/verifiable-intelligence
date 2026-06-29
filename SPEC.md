@@ -70,7 +70,7 @@ The old Rust CLI/keygen/verifier crates remain implementation assets. The old Ru
 | ID | Question | Default | Resolution trigger |
 |----|----------|---------|--------------------|
 | OQ-1 | Repository organization | personal repo | Before public release |
-| OQ-2 | Reference model | CommitLLM-supported Llama/Qwen W8A8 profile | Before provider integration starts |
+| OQ-2 | Reference model | Resolved for v1: `llama-3.1-8b-w8a8` with CommitLLM profile `llama-w8a8-audited` at pin `25541e83`; see [`docs/spikes/reference-model.md`](./docs/spikes/reference-model.md) | Provider integration uses this selection |
 | OQ-3 | Browser verifier strategy | WASM wrapper over CommitLLM verifier if feasible; server-side verification fallback only for prototype | WASM spike |
 | OQ-4 | Public hosted demo | Static demo public, live GPU endpoint gated by cost | Before public release |
 | OQ-5 | Payment or credits | toy credits only | Before any hosted demo |
@@ -81,7 +81,7 @@ The old Rust CLI/keygen/verifier crates remain implementation assets. The old Ru
 1. **Browser-first demo.** Consumers of a marketplace proof should not install Rust to understand a receipt.
 2. **No unauthorized resale support.** The motivating failure mode is model substitution in untrusted markets, but the project only supports authorized providers and open-weight models.
 3. **Proof bundle over raw receipt.** A buyer needs quote, model identity, prompt hash, answer hash, audit endpoint, and report in one portable artifact.
-4. **Prefer existing CommitLLM measured profiles.** The old Llama 3.2 1B W8A8 corridor work becomes research backlog, not the v1 blocker.
+4. **Reference model selected.** v1 provider integration uses `llama-3.1-8b-w8a8` with CommitLLM profile `llama-w8a8-audited` at pin `25541e83`. Qwen remains a maintained secondary candidate and red-path/model-swap fixture. The old Llama 3.2 1B W8A8 corridor work becomes research backlog, not the v1 blocker.
 5. **CLI remains, TUI defers.** CLI utilities help implementation and CI. The terminal TUI no longer carries the demo story.
 
 ## Residual risk

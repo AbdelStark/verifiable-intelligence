@@ -32,6 +32,27 @@ function firstFailingField(bundle) {
   return failed && failed.field;
 }
 
+function checkReferenceBinding(bundle, fixtureFile) {
+  if (!manifest.reference) return [];
+
+  const referenceFailures = [];
+  const expected = manifest.reference;
+  const checks = [
+    ['quote.model_id', bundle.quote.model_id, expected.model_id],
+    ['quote.checkpoint_hash', bundle.quote.checkpoint_hash, expected.checkpoint_hash],
+    ['quote.commitllm_pin', bundle.quote.commitllm_pin, expected.commitllm_pin],
+    ['verifier.commitllm_pin', bundle.verifier.commitllm_pin, expected.commitllm_pin]
+  ];
+
+  for (const [field, actual, expectedValue] of checks) {
+    if (actual !== expectedValue) {
+      referenceFailures.push(`${fixtureFile}: expected ${field} ${expectedValue}, got ${actual}`);
+    }
+  }
+
+  return referenceFailures;
+}
+
 const failures = [];
 for (const fixture of manifest.fixtures) {
   const fixturePath = path.join(fixtureDir, fixture.file);
@@ -44,6 +65,8 @@ for (const fixture of manifest.fixtures) {
   if (bundle.report.overall !== fixture.expected_overall) {
     failures.push(`${fixture.file}: expected overall ${fixture.expected_overall}, got ${bundle.report.overall}`);
   }
+
+  failures.push(...checkReferenceBinding(bundle, fixture.file));
 
   const rawFields = collectRawFields(bundle);
   if (rawFields.length) {

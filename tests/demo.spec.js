@@ -34,7 +34,7 @@ async function assertPrimaryControlsAreUsable(page) {
 test.describe('static proof-market demo', () => {
   test('renders provider cards and usable primary controls', async ({ page }) => {
     await openDemo(page);
-    await expect(page.getByTestId('provider-lab-l4-01')).toBeVisible();
+    await expect(page.getByTestId('provider-lab-a100-01')).toBeVisible();
     await expect(page.getByTestId('provider-desk-a10g-cheap')).toBeVisible();
     await expect(page.getByTestId('provider-frontier-proxy-x')).toBeVisible();
     await assertPrimaryControlsAreUsable(page);

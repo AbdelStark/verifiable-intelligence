@@ -156,7 +156,7 @@ Success for them is a repo where the demo's green path and red paths are reprodu
 
 ## 12. Open Questions
 
-- OQ-1. Which CommitLLM-supported model should be the live reference: Llama 3.1 8B W8A8, Qwen2.5 7B W8A8, or a smaller measured profile if upstream lands one?
+- OQ-1. Resolved for v1: the live reference is `llama-3.1-8b-w8a8` with CommitLLM profile `llama-w8a8-audited` at pin `25541e83`. Qwen2.5 7B W8A8 remains a maintained secondary candidate and red-path/model-swap fixture. Llama 3.2 1B W8A8 moves to research backlog until it has a measured supported corridor.
 - OQ-2. Can the CommitLLM verifier compile to WASM with acceptable binary size and browser memory use?
 - OQ-3. Should proof bundles embed receipt bytes directly or reference them by content-addressed URL for deep audits?
 - OQ-4. Should provider quotes be signed in v1 with Ed25519, or is a demo signature enough until live providers exist?

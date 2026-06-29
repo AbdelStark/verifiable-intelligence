@@ -34,7 +34,7 @@ The verifier needs material derived from the model's weights to check receipts. 
 
 ### Inputs
 
-- `--model <id>`: canonical identifier; v1 supports exactly `llama-3.2-1b-w8a8`.
+- `--model <id>`: canonical identifier; after the marketplace pivot, v1 provider integration uses `llama-3.1-8b-w8a8` unless a later reference-model decision supersedes it.
 - `--checkpoint <path>`: optional local directory; defaults to the published mirror.
 - `--output <path>`: optional, defaults to `./key.bin`.
 - `--seed <u64>`: optional, defaults to a documented constant (e.g. `0`).
