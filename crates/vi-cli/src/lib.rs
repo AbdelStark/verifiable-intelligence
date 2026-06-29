@@ -18,10 +18,12 @@ use std::{
 };
 
 use clap::{error::ErrorKind, Args, Parser, Subcommand};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vi_errors::{ErrorEnvelope, IdentityFields, NetworkErrorKind, PhaseId, ViError};
 use vi_receipt::{AuditChallenge, AuditTier, ReceiptBindingHeader};
 
+const CLI_OUTPUT_SCHEMA_VERSION: u16 = 1;
 const SUBCOMMAND: &str = "vi";
 const TEST_HOOKS_ENV: &str = "VI_ENABLE_TEST_HOOKS";
 const ENDPOINT_ENV: &str = "VI_ENDPOINT";
@@ -378,15 +380,8 @@ fn run_tui(args: &TuiArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
             tamper,
             args.phase_delay,
         ))?;
-        let value = serde_json::json!({
-            "schema_version": 1,
-            "subcommand": "tui",
-            "status": report.status,
-            "endpoint": report.endpoint,
-            "tamper": report.tamper.map(vi_tui::TamperMode::as_str),
-            "phase_delay_ms": report.phase_delay_ms,
-        });
-        json_output(&value, config, "tui")
+        let output = TuiOutput::from_report(report);
+        json_output(&output, config, "tui")
     }
 
     #[cfg(not(feature = "tui"))]
@@ -424,17 +419,9 @@ fn run_keygen(args: KeygenArgs, config: &ResolvedConfig) -> Result<Output, ViErr
         options = options.with_expected_checkpoint_hash(expected_checkpoint_hash);
     }
 
-    let report = vi_keygen::keygen_with_options(&options)?;
-    let mut value = serde_json::to_value(report).map_err(|error| ViError::Internal {
-        backtrace: format!("failed to serialize keygen output: {error}"),
-    })?;
-    let object = value.as_object_mut().ok_or_else(|| ViError::Internal {
-        backtrace: "keygen report did not serialize to an object".to_owned(),
-    })?;
-    object.insert("schema_version".to_owned(), serde_json::json!(1));
-    object.insert("subcommand".to_owned(), serde_json::json!("keygen"));
+    let output = KeygenOutput::new(vi_keygen::keygen_with_options(&options)?);
 
-    json_output(&value, config, "keygen")
+    json_output(&output, config, "keygen")
 }
 
 fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
@@ -457,15 +444,8 @@ fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError>
     if args.no_receipt {
         let response = client.post_chat_completions_without_receipt(&trace_id, body)?;
         let text = vi_client::parse_openai_chat_response(&response)?;
-        let value = serde_json::json!({
-            "schema_version": 1,
-            "subcommand": "chat",
-            "endpoint": response.endpoint,
-            "status": response.status,
-            "text": text,
-            "warnings": [],
-        });
-        return json_output(&value, config, "chat");
+        let output = ChatOutput::new(response.endpoint, response.status, text, None, Vec::new());
+        return json_output(&output, config, "chat");
     }
 
     let receipt_out = args.receipt_out.as_ref().ok_or_else(|| ViError::Input {
@@ -482,20 +462,18 @@ fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError>
             content_type: response.content_type.clone().unwrap_or_default(),
         })?;
     write_binary_output(receipt_out, &receipt_bytes)?;
-    let value = serde_json::json!({
-        "schema_version": 1,
-        "subcommand": "chat",
-        "endpoint": response.endpoint,
-        "status": response.status,
-        "text": parsed.text,
-        "receipt": {
-            "path": receipt_out,
-            "size_bytes": receipt_bytes.len(),
-        },
-        "warnings": parsed.warning.into_iter().collect::<Vec<_>>(),
-    });
+    let output = ChatOutput::new(
+        response.endpoint,
+        response.status,
+        parsed.text,
+        Some(ChatReceiptOutput {
+            path: receipt_out,
+            size_bytes: receipt_bytes.len(),
+        }),
+        parsed.warning.into_iter().collect(),
+    );
 
-    json_output(&value, config, "chat")
+    json_output(&output, config, "chat")
 }
 
 fn run_verify(args: &VerifyArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
@@ -508,9 +486,9 @@ fn run_verify(args: &VerifyArgs, config: &ResolvedConfig) -> Result<Output, ViEr
     let key_bytes = read_input_file(&args.key, "--key")?;
     let mut audit_provider = build_verify_audit_provider(tier, config, &receipt_bytes)?;
     let report = vi_verifier::verify(&receipt_bytes, &key_bytes, tier, &mut audit_provider)?;
-    let value = verify_report_json(&report);
+    let output = VerifyOutput::from_report(&report);
 
-    json_output(&value, config, "verify")
+    json_output(&output, config, "verify")
 }
 
 fn parse_audit_tier(value: &str) -> Result<AuditTier, ViError> {
@@ -619,25 +597,117 @@ impl vi_verifier::AuditProvider for VerifyAuditProvider {
     }
 }
 
-fn verify_report_json(report: &vi_verifier::VerifyReport) -> serde_json::Value {
-    serde_json::json!({
-        "schema_version": 1,
-        "subcommand": "verify",
-        "tier": report.tier.as_str(),
-        "verdict": match report.verdict {
-            vi_verifier::VerifyVerdict::Pass => "pass",
-            vi_verifier::VerifyVerdict::Fail => "fail",
-        },
-        "phases": report
-            .phases
-            .iter()
-            .map(|phase| phase.as_str())
-            .collect::<Vec<_>>(),
-        "checks_run": report.checks_run,
-        "checks_passed": report.checks_passed,
-        "warnings": report.warnings,
-        "elapsed_ms": report.elapsed_ms,
-    })
+#[derive(Debug, Serialize)]
+struct KeygenOutput {
+    schema_version: u16,
+    subcommand: &'static str,
+    #[serde(flatten)]
+    report: vi_keygen::KeygenReport,
+}
+
+impl KeygenOutput {
+    fn new(report: vi_keygen::KeygenReport) -> Self {
+        Self {
+            schema_version: CLI_OUTPUT_SCHEMA_VERSION,
+            subcommand: "keygen",
+            report,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ChatOutput<'a> {
+    schema_version: u16,
+    subcommand: &'static str,
+    endpoint: String,
+    status: u16,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt: Option<ChatReceiptOutput<'a>>,
+    warnings: Vec<String>,
+}
+
+impl<'a> ChatOutput<'a> {
+    fn new(
+        endpoint: String,
+        status: u16,
+        text: String,
+        receipt: Option<ChatReceiptOutput<'a>>,
+        warnings: Vec<String>,
+    ) -> Self {
+        Self {
+            schema_version: CLI_OUTPUT_SCHEMA_VERSION,
+            subcommand: "chat",
+            endpoint,
+            status,
+            text,
+            receipt,
+            warnings,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ChatReceiptOutput<'a> {
+    path: &'a Path,
+    size_bytes: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct VerifyOutput<'a> {
+    schema_version: u16,
+    subcommand: &'static str,
+    tier: &'static str,
+    verdict: &'static str,
+    phases: Vec<&'static str>,
+    checks_run: usize,
+    checks_passed: usize,
+    warnings: &'a [String],
+    elapsed_ms: u64,
+}
+
+impl<'a> VerifyOutput<'a> {
+    fn from_report(report: &'a vi_verifier::VerifyReport) -> Self {
+        Self {
+            schema_version: CLI_OUTPUT_SCHEMA_VERSION,
+            subcommand: "verify",
+            tier: report.tier.as_str(),
+            verdict: match report.verdict {
+                vi_verifier::VerifyVerdict::Pass => "pass",
+                vi_verifier::VerifyVerdict::Fail => "fail",
+            },
+            phases: report.phases.iter().map(|phase| phase.as_str()).collect(),
+            checks_run: report.checks_run,
+            checks_passed: report.checks_passed,
+            warnings: &report.warnings,
+            elapsed_ms: report.elapsed_ms,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
+struct TuiOutput {
+    schema_version: u16,
+    subcommand: &'static str,
+    status: &'static str,
+    endpoint: Option<String>,
+    tamper: Option<&'static str>,
+    phase_delay_ms: u64,
+}
+
+impl TuiOutput {
+    #[cfg(feature = "tui")]
+    fn from_report(report: vi_tui::RunReport) -> Self {
+        Self {
+            schema_version: CLI_OUTPUT_SCHEMA_VERSION,
+            subcommand: "tui",
+            status: report.status,
+            endpoint: report.endpoint,
+            tamper: report.tamper.map(vi_tui::TamperMode::as_str),
+            phase_delay_ms: report.phase_delay_ms,
+        }
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -695,7 +765,7 @@ fn write_binary_output(path: &Path, bytes: &[u8]) -> Result<(), ViError> {
 }
 
 fn json_output(
-    value: &serde_json::Value,
+    value: &(impl Serialize + ?Sized),
     config: &ResolvedConfig,
     context: &'static str,
 ) -> Result<Output, ViError> {
@@ -982,6 +1052,65 @@ mod tests {
         assert!(flag_config.no_color);
     }
 
+    #[test]
+    fn success_output_shapes_match_snapshots() {
+        assert_output_snapshot(
+            &KeygenOutput::new(vi_keygen::KeygenReport {
+                model_id: "toy-model".to_owned(),
+                checkpoint_hash: "sha256:checkpoint".to_owned(),
+                key_hash: "sha256:key".to_owned(),
+                key_size_bytes: 1234,
+                output: PathBuf::from("toy.viky"),
+                seed: 7,
+                commitllm_revision: vi_keygen::COMMITLLM_PIN.to_owned(),
+                commitllm_pin: vi_keygen::COMMITLLM_SHORT_PIN.to_owned(),
+                decode_artifact: None,
+                warnings: Vec::new(),
+            }),
+            include_str!("../tests/snapshots/output/keygen.json"),
+        );
+
+        assert_output_snapshot(
+            &ChatOutput::new(
+                "https://provider.example/v1/chat/completions".to_owned(),
+                200,
+                "fixture answer".to_owned(),
+                Some(ChatReceiptOutput {
+                    path: Path::new("answer.virc"),
+                    size_bytes: 42,
+                }),
+                Vec::new(),
+            ),
+            include_str!("../tests/snapshots/output/chat.json"),
+        );
+
+        let verify_report = vi_verifier::VerifyReport {
+            tier: AuditTier::Full,
+            verdict: vi_verifier::VerifyVerdict::Pass,
+            phases: vi_verifier::VERIFY_PHASES.to_vec(),
+            checks_run: vi_verifier::VERIFY_PHASES.len(),
+            checks_passed: vi_verifier::VERIFY_PHASES.len(),
+            warnings: Vec::new(),
+            elapsed_ms: 11,
+        };
+        assert_output_snapshot(
+            &VerifyOutput::from_report(&verify_report),
+            include_str!("../tests/snapshots/output/verify.json"),
+        );
+
+        assert_output_snapshot(
+            &TuiOutput {
+                schema_version: CLI_OUTPUT_SCHEMA_VERSION,
+                subcommand: "tui",
+                status: "stub",
+                endpoint: Some("https://provider.example".to_owned()),
+                tamper: Some("byte-flip"),
+                phase_delay_ms: 250,
+            },
+            include_str!("../tests/snapshots/output/tui.json"),
+        );
+    }
+
     #[cfg(not(feature = "tui"))]
     #[test]
     fn tui_without_feature_returns_unsupported_tier() {
@@ -996,6 +1125,13 @@ mod tests {
                 reason: "the vi binary was built without the tui feature".to_owned(),
             }
         );
+    }
+
+    fn assert_output_snapshot(value: &(impl Serialize + ?Sized), expected: &str) {
+        let mut actual =
+            serde_json::to_string_pretty(value).expect("output snapshot should serialize");
+        actual.push('\n');
+        assert_eq!(actual, expected);
     }
 
     fn fake_env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<OsString> + 'a {
