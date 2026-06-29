@@ -152,8 +152,14 @@ The provider API inherits the old receipt surface:
 
 - `POST /v1/chat/completions`
 - request header `X-Verifiable-Receipt: 1`
+- request header `X-Verifiable-Intelligence-Trace: <trace_id>` for log correlation
 - `POST /v1/audit`
 - `GET /healthz`
+
+`X-Verifiable-Intelligence-Trace` is not proof material. Clients set it on chat
+and audit calls so CLI, broker, and provider logs can be correlated. Providers
+must echo the value as `trace_id` on `provider.audit` log lines when the header
+is present.
 
 ### `POST /v1/audit`
 

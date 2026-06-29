@@ -22,7 +22,7 @@ The pivot adds browser, broker, and proof-bundle events to the original provider
 | `demo.verify.finished` | browser/verifier | `overall`, `elapsed_ms`, `warning_count` |
 | `broker.provider.forward` | broker | `quote_id`, `provider_id`, `request_id`, `trace_id` |
 | `provider.boot` | provider | `commitllm_pin`, `model_id`, `checkpoint_hash`, `key_hash` |
-| `provider.audit` | provider | `request_id`, `tier`, `token_index`, `layer_count`, `duration_ms` |
+| `provider.audit` | provider | `request_id`, `trace_id` when present, `tier`, `token_index`, `layer_count`, `duration_ms` |
 
 ## Redaction
 

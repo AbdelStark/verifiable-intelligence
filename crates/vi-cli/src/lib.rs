@@ -358,7 +358,7 @@ fn run_parsed_cli(cli: Cli, config: &ResolvedConfig, trace_id: &str, log_args: &
     let _guard = span.enter();
     vi_log::emit_process_start(log_args);
 
-    match run_cli(cli, config) {
+    match run_cli(cli, config, trace_id) {
         Ok(output) => {
             vi_log::emit_process_end(0, elapsed_millis(started_at));
             print_output(output);
@@ -380,11 +380,11 @@ fn log_args(args: &[OsString]) -> Vec<String> {
         .collect()
 }
 
-fn run_cli(cli: Cli, config: &ResolvedConfig) -> Result<Output, ViError> {
+fn run_cli(cli: Cli, config: &ResolvedConfig, trace_id: &str) -> Result<Output, ViError> {
     match cli.command {
         Some(CliCommand::Keygen(args)) => run_keygen(args, config),
-        Some(CliCommand::Chat(args)) => run_chat(&args, config),
-        Some(CliCommand::Verify(args)) => run_verify(&args, config),
+        Some(CliCommand::Chat(args)) => run_chat(&args, config, trace_id),
+        Some(CliCommand::Verify(args)) => run_verify(&args, config, trace_id),
         Some(CliCommand::Tui(args)) => run_tui(&args, config),
         Some(CliCommand::Panic) => {
             ensure_test_hooks_enabled()?;
@@ -477,7 +477,7 @@ fn run_keygen(args: KeygenArgs, config: &ResolvedConfig) -> Result<Output, ViErr
     json_output(&output, config, "keygen")
 }
 
-fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
+fn run_chat(args: &ChatArgs, config: &ResolvedConfig, trace_id: &str) -> Result<Output, ViError> {
     if args.no_receipt && args.receipt_out.is_some() {
         return Err(ViError::Input {
             arg: "--receipt-out".to_owned(),
@@ -492,10 +492,9 @@ fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError>
     })?;
     let body = chat_request_body(&args.prompt, args.max_tokens)?;
     let client = vi_client::ChatClient::new(endpoint, config.api_key.clone())?;
-    let trace_id = trace_id();
 
     if args.no_receipt {
-        let response = client.post_chat_completions_without_receipt(&trace_id, body)?;
+        let response = client.post_chat_completions_without_receipt(trace_id, body)?;
         let text = vi_client::parse_openai_chat_response(&response)?;
         let output = ChatOutput::new(response.endpoint, response.status, text, None, Vec::new());
         return json_output(&output, config, "chat");
@@ -506,7 +505,7 @@ fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError>
         reason: "--receipt-out is required unless --no-receipt is set".to_owned(),
         detail: None,
     })?;
-    let response = client.post_chat_completions(&trace_id, body)?;
+    let response = client.post_chat_completions(trace_id, body)?;
     let parsed = vi_client::parse_chat_response(&response)?;
     let receipt_bytes = parsed
         .receipt_bytes
@@ -529,7 +528,11 @@ fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError>
     json_output(&output, config, "chat")
 }
 
-fn run_verify(args: &VerifyArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
+fn run_verify(
+    args: &VerifyArgs,
+    config: &ResolvedConfig,
+    trace_id: &str,
+) -> Result<Output, ViError> {
     let tier = parse_audit_tier(&args.tier)?;
     if tier_requires_audit(tier) && config.endpoint.is_none() {
         return Err(missing_audit_endpoint(tier));
@@ -537,7 +540,7 @@ fn run_verify(args: &VerifyArgs, config: &ResolvedConfig) -> Result<Output, ViEr
 
     let receipt_bytes = read_input_file(&args.receipt, "--receipt")?;
     let key_bytes = read_input_file(&args.key, "--key")?;
-    let mut audit_provider = build_verify_audit_provider(tier, config, &receipt_bytes)?;
+    let mut audit_provider = build_verify_audit_provider(tier, config, &receipt_bytes, trace_id)?;
     let report = vi_verifier::verify_with_callback(
         &receipt_bytes,
         &key_bytes,
@@ -602,6 +605,7 @@ fn build_verify_audit_provider(
     tier: AuditTier,
     config: &ResolvedConfig,
     receipt_bytes: &[u8],
+    trace_id: &str,
 ) -> Result<VerifyAuditProvider, ViError> {
     if !tier_requires_audit(tier) {
         return Ok(VerifyAuditProvider::None);
@@ -627,7 +631,7 @@ fn build_verify_audit_provider(
     Ok(VerifyAuditProvider::Http {
         client: vi_client::ChatClient::new(endpoint, config.api_key.clone())?,
         receipt_hash: sha256_hex(receipt_bytes),
-        trace_id: trace_id(),
+        trace_id: trace_id.to_owned(),
     })
 }
 
@@ -1092,6 +1096,34 @@ mod tests {
     }
 
     #[test]
+    fn http_audit_provider_uses_invocation_trace_id() {
+        let config = ResolvedConfig {
+            endpoint: Some("https://provider.example".to_owned()),
+            ..ResolvedConfig::default()
+        };
+
+        let provider = build_verify_audit_provider(
+            AuditTier::Deep,
+            &config,
+            b"receipt-bytes",
+            "trace-from-process",
+        )
+        .expect("audit provider builds");
+
+        match provider {
+            VerifyAuditProvider::Http {
+                receipt_hash,
+                trace_id,
+                ..
+            } => {
+                assert_eq!(receipt_hash, sha256_hex(b"receipt-bytes"));
+                assert_eq!(trace_id, "trace-from-process");
+            }
+            other => panic!("expected HTTP audit provider, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn log_precedence_is_flag_then_vi_log_then_rust_log() {
         let env_only = Cli::try_parse_from([
             "vi",
@@ -1274,7 +1306,7 @@ mod tests {
     fn tui_without_feature_returns_unsupported_tier() {
         let cli = Cli::try_parse_from(["vi", "tui"]).expect("tui parses");
 
-        let error = run_cli(cli, &ResolvedConfig::default())
+        let error = run_cli(cli, &ResolvedConfig::default(), "trace-test")
             .expect_err("tui should fail without the feature");
 
         assert_eq!(

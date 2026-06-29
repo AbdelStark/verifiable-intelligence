@@ -69,9 +69,20 @@ async function jsonRequest(baseUrl, method, pathname, body, headers = {}) {
   return { status: response.status, body: payload };
 }
 
+async function binaryRequest(baseUrl, method, pathname, body, headers = {}) {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    method,
+    headers: body === undefined ? headers : { 'content-type': 'application/json', ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const payload = Buffer.from(await response.arrayBuffer());
+  return { status: response.status, contentType: response.headers.get('content-type'), body: payload };
+}
+
 async function main() {
   let now = 1782734700000;
-  const server = createServer({ now: () => now });
+  const providerLogs = [];
+  const server = createServer({ now: () => now, providerLog: (event) => providerLogs.push(event) });
   const baseUrl = await listen(server);
 
   try {
@@ -152,6 +163,31 @@ async function main() {
     assert.equal(bundle.quote.signature, quoteResponse.body.signature);
     assert.equal(bundle.quote.decode_policy_hash, quoteResponse.body.decode_policy_hash);
     assert.equal(bundle.request.max_tokens, quoteResponse.body.decode_policy.max_tokens);
+
+    const auditResponse = await binaryRequest(
+      baseUrl,
+      'POST',
+      '/v1/audit',
+      {
+        receipt_hash: bundle.receipt.sha256,
+        tier: bundle.audit.tier,
+        challenge: bundle.audit.challenge
+      },
+      { 'x-verifiable-intelligence-trace': 'trace-provider-123' }
+    );
+    assert.equal(auditResponse.status, 200);
+    assert.equal(auditResponse.contentType, 'application/vnd.verifiable-intelligence.audit+binary');
+    const auditBody = JSON.parse(auditResponse.body.toString('utf8'));
+    assert.match(auditBody.request_id, /^aud_[0-9a-f]{8}$/);
+    assert.equal(auditBody.receipt_hash, bundle.receipt.sha256);
+    assert.equal(providerLogs.length, 1);
+    assert.equal(providerLogs[0].event, 'provider.audit');
+    assert.equal(providerLogs[0].trace_id, 'trace-provider-123');
+    assert.equal(providerLogs[0].request_id, auditBody.request_id);
+    assert.equal(providerLogs[0].tier, bundle.audit.tier);
+    assert.equal(providerLogs[0].token_index, bundle.audit.challenge.token_index);
+    assert.equal(providerLogs[0].layer_count, bundle.audit.challenge.layer_indices.length);
+    assert.equal(typeof providerLogs[0].duration_ms, 'number');
 
     const credentialChat = await jsonRequest(baseUrl, 'POST', '/chat', {
       quote_id: quoteResponse.body.quote_id,
