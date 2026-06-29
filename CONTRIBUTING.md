@@ -13,6 +13,8 @@ out of scope.
 
 Start with [`SPEC.md`](./SPEC.md), then read:
 
+- [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) for participation and enforcement
+  expectations.
 - [`docs/rfcs/RFC-0001-workspace-and-crate-layout.md`](./docs/rfcs/RFC-0001-workspace-and-crate-layout.md)
   for the Rust workspace and crate boundaries that still apply.
 - [`docs/rfcs/RFC-0009-tamper-fuzz-harness.md`](./docs/rfcs/RFC-0009-tamper-fuzz-harness.md)
