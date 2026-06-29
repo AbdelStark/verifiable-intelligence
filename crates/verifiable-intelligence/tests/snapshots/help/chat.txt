@@ -1,0 +1,15 @@
+Send a chat request to a receipt-capable provider
+
+Usage: vi chat [OPTIONS] --prompt <TEXT>
+
+Options:
+  -e, --endpoint <URL>      Provider or broker endpoint; defaults to VI_ENDPOINT
+      --pretty              Format the same output object for humans instead of compact JSON
+      --log <FILTER>        Log filter; overrides VI_LOG and RUST_LOG
+  -p, --prompt <TEXT>       User prompt to send as a single OpenAI-compatible user message
+      --api-key <TOKEN>     Provider API key; VI_API_KEY is preferred
+      --max-tokens <U32>    Maximum generated tokens requested from the provider [default: 256]
+      --no-color            Disable ANSI color in pretty output
+      --receipt-out <PATH>  Destination path for the VIRC receipt; required unless --no-receipt is set
+      --no-receipt          Send a plain OpenAI-compatible request without receipt opt-in
+  -h, --help                Print help

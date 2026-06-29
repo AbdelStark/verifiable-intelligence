@@ -1,0 +1,29 @@
+Generate a verifier key envelope
+
+Usage: vi keygen [OPTIONS] --model <MODEL> --checkpoint <DIR> --output <PATH>
+
+Options:
+      --model <MODEL>
+          Public model identifier to bind into the verifier key
+      --pretty
+          Format the same output object for humans instead of compact JSON
+      --checkpoint <DIR>
+          Local checkpoint directory containing config, safetensors, and tokenizer files
+      --log <FILTER>
+          Log filter; overrides VI_LOG and RUST_LOG
+      --api-key <TOKEN>
+          Provider API key; VI_API_KEY is preferred
+  -o, --output <PATH>
+          Destination path for the generated VIKY verifier-key envelope
+      --no-color
+          Disable ANSI color in pretty output
+      --seed <U64>
+          Deterministic key-generation seed [default: 0]
+      --force
+          Overwrite an existing output file
+      --expected-checkpoint-hash <SHA256>
+          Expected canonical checkpoint hash formatted as sha256:<hex>
+      --allow-checkpoint-drift
+          Warn instead of failing when --expected-checkpoint-hash mismatches
+  -h, --help
+          Print help

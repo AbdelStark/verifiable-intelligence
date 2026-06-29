@@ -1,0 +1,17 @@
+Verifiable Intelligence CLI
+
+Usage: vi [OPTIONS] [COMMAND]
+
+Commands:
+  keygen  Generate a verifier key envelope
+  chat    Send a chat request to a receipt-capable provider
+  verify  Verify a receipt against a verifier key
+  tui     Run the deferred terminal demo UI
+
+Options:
+      --pretty           Format the same output object for humans instead of compact JSON
+      --log <FILTER>     Log filter; overrides VI_LOG and RUST_LOG
+      --api-key <TOKEN>  Provider API key; VI_API_KEY is preferred
+      --no-color         Disable ANSI color in pretty output
+  -h, --help             Print help
+  -V, --version          Print version

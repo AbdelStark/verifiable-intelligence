@@ -1,0 +1,23 @@
+Verify a receipt against a verifier key
+
+Usage: vi verify [OPTIONS] --receipt <PATH> --key <PATH>
+
+Options:
+      --pretty
+          Format the same output object for humans instead of compact JSON
+      --receipt <PATH>
+          Path to the VIRC receipt envelope
+      --key <PATH>
+          Path to the VIKY verifier-key envelope
+      --log <FILTER>
+          Log filter; overrides VI_LOG and RUST_LOG
+      --api-key <TOKEN>
+          Provider API key; VI_API_KEY is preferred
+      --tier <TIER>
+          Verification tier: receipt-only, routine, deep, or full [default: routine]
+      --audit-endpoint <URL|file://PATH>
+          Provider audit endpoint for deep/full tiers; defaults to VI_ENDPOINT
+      --no-color
+          Disable ANSI color in pretty output
+  -h, --help
+          Print help
