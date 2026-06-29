@@ -1,0 +1,36 @@
+name: Keygen Determinism
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/keygen-determinism.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/vi-keygen/**"
+      - "crates/vi-errors/**"
+      - "crates/vi-receipt/**"
+      - "deny.toml"
+      - "rust-toolchain.toml"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/keygen-determinism.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/vi-keygen/**"
+      - "crates/vi-errors/**"
+      - "crates/vi-receipt/**"
+      - "deny.toml"
+      - "rust-toolchain.toml"
+
+jobs:
+  determinism:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run keygen determinism test
+        run: cargo test -p vi-keygen tests::keygen_same_inputs_are_byte_identical_and_seed_changes_bytes -- --exact
