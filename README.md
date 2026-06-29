@@ -71,6 +71,10 @@ Guides:
 - [Provider integration guide](./docs/guides/provider-integration-guide.md)
 - [v0.1.0 pivot demo release notes](./docs/release/v0.1.0-pivot-demo.md)
 
+## Protocol Pin
+
+Verified against CommitLLM pin: `lambdaclass/CommitLLM@25541e83347655e44ad6e84eb901e1e7ae392a66` (`25541e83`).
+
 ## License
 
 MIT, matching CommitLLM upstream.

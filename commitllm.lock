@@ -1,0 +1,11 @@
+# verifiable-intelligence pin
+# Changing this requires:
+#  1. Update Cargo.toml git rev to match.
+#  2. Rebuild provider/ and verify smoke test passes.
+#  3. Regenerate canonical fixtures when live provider fixtures exist.
+#  4. Add CHANGELOG entry under [Unreleased] / Pin section when CHANGELOG exists.
+#  5. Verify tamper tests still pass.
+commitllm = "lambdaclass/CommitLLM@25541e83347655e44ad6e84eb901e1e7ae392a66"
+commitllm_short = "25541e83"
+pinned_at = "2026-06-29"
+note = "Pre-rename pin selected for the v1 marketplace proof demo; see RFC-0011."

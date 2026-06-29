@@ -8,10 +8,11 @@
     "test:wasm": "playwright test tests/commitllm-wasm.spec.js",
     "test:docs": "node scripts/test-doc-boundaries.js",
     "test:release": "node scripts/test-release-comprehension.js",
+    "test:pin": "node scripts/ci/check-commitllm-pin.js",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
     "test:broker": "node scripts/test-broker-api.js",
-    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker && npm run test:docs && npm run test:release"
+    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker && npm run test:docs && npm run test:release && npm run test:pin"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
