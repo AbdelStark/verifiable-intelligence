@@ -63,6 +63,11 @@ CommitLLM returns a compact receipt and opens trace data only when challenged. O
 
 For the current scope, read [`PRD.md`](./PRD.md), [`SPEC.md`](./SPEC.md), and [`docs/rfcs/RFC-0016-marketplace-demo-pivot.md`](./docs/rfcs/RFC-0016-marketplace-demo-pivot.md).
 
+Guides:
+
+- [Buyer proof guide](./docs/guides/buyer-proof-guide.md)
+- [Provider integration guide](./docs/guides/provider-integration-guide.md)
+
 ## License
 
 MIT, matching CommitLLM upstream.
