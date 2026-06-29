@@ -21,11 +21,22 @@ function assertMatches(file, pattern, label = pattern.source) {
   }
 }
 
+function assertDeepEqual(actual, expected, label) {
+  const actualJson = JSON.stringify(actual);
+  const expectedJson = JSON.stringify(expected);
+  if (actualJson !== expectedJson) {
+    throw new Error(`${label} mismatch\nactual: ${actualJson}\nexpected: ${expectedJson}`);
+  }
+}
+
 const buyerGuide = 'docs/guides/buyer-proof-guide.md';
 const providerGuide = 'docs/guides/provider-integration-guide.md';
 const contributingGuide = 'CONTRIBUTING.md';
 const securityGuide = 'SECURITY.md';
 const corridorGuide = 'docs/measurements/corridor.md';
+const ciGuide = 'docs/ci/README.md';
+const redBuildGuide = 'docs/ci/red-build.md';
+const gpuRunnerGuide = 'docs/ci/gpu-runners.md';
 
 assertIncludes('README.md', './docs/guides/buyer-proof-guide.md', 'buyer guide link');
 assertIncludes('README.md', './docs/guides/provider-integration-guide.md', 'provider guide link');
@@ -85,6 +96,37 @@ for (const term of [
   'RFC-0010',
 ]) {
   assertIncludes(corridorGuide, term, `corridor template ${term}`);
+}
+
+const workflowDir = path.join(root, '.github', 'workflows');
+const actualWorkflows = fs.readdirSync(workflowDir)
+  .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
+  .map((name) => `.github/workflows/${name}`)
+  .sort();
+const listedWorkflows = Array.from(read(ciGuide).matchAll(/`(\.github\/workflows\/[^`]+\.ya?ml)`/g))
+  .map((match) => match[1])
+  .sort();
+
+assertDeepEqual(listedWorkflows, actualWorkflows, 'docs/ci workflow table');
+
+for (const term of [
+  'red-build.md',
+  'gpu-runners.md',
+  'reports/ci/',
+  'reports/perf/',
+  'release.yml',
+  'corridor.yml',
+  'deploy-hf.yml',
+]) {
+  assertIncludes(ciGuide, term, `ci guide ${term}`);
+}
+
+for (const term of ['Red Build Runbook', 'Local Reproduction Map', 'gh run view', 'npm run test:bundle']) {
+  assertIncludes(redBuildGuide, term, `red-build guide ${term}`);
+}
+
+for (const term of ['GPU Runner Setup', 'self-hosted', 'vi-corridor', 'cost', 'no workflow']) {
+  assertIncludes(gpuRunnerGuide, term, `gpu runner guide ${term}`);
 }
 
 console.log('Documentation boundary checks passed');
