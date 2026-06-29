@@ -11,7 +11,7 @@ use std::{
 use serde_json::{Map, Number, Value};
 use tracing::{
     field::{Field, Visit},
-    Event, Subscriber,
+    Event, Level, Subscriber,
 };
 use tracing_subscriber::{
     fmt::{format::Writer, FmtContext, FormatEvent, FormatFields},
@@ -173,7 +173,7 @@ where
         event: &Event<'_>,
     ) -> fmt::Result {
         let metadata = event.metadata();
-        let mut fields = JsonFieldVisitor::default();
+        let mut fields = JsonFieldVisitor::new(*metadata.level());
         event.record(&mut fields);
 
         let mut object = fields.into_fields();
@@ -201,18 +201,169 @@ fn unix_timestamp_ms() -> String {
         .to_string()
 }
 
-#[derive(Debug, Default)]
+/// Subscriber-level redaction policy for event fields.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RedactionLayer;
+
+impl RedactionLayer {
+    fn redact_value(field: &str, value: Value, level: Level) -> Option<Value> {
+        match redaction_action(field) {
+            RedactionAction::Keep => Some(value),
+            RedactionAction::Drop => None,
+            RedactionAction::BytesPrefixAtTrace => {
+                if level == Level::TRACE {
+                    Some(value_to_hex_prefix(value))
+                } else {
+                    None
+                }
+            }
+            RedactionAction::SanitizeArgs => Some(sanitize_args_value(value)),
+        }
+    }
+
+    fn redact_bytes(field: &str, value: &[u8], level: Level) -> Option<Value> {
+        match redaction_action(field) {
+            RedactionAction::Keep => Some(Value::Array(
+                value
+                    .iter()
+                    .map(|byte| Value::Number(Number::from(*byte)))
+                    .collect(),
+            )),
+            RedactionAction::Drop => None,
+            RedactionAction::BytesPrefixAtTrace => {
+                (level == Level::TRACE).then(|| Value::String(hex_prefix(value)))
+            }
+            RedactionAction::SanitizeArgs => Some(sanitize_args_value(Value::String(
+                String::from_utf8_lossy(value).into_owned(),
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RedactionAction {
+    Keep,
+    Drop,
+    BytesPrefixAtTrace,
+    SanitizeArgs,
+}
+
+fn redaction_action(field: &str) -> RedactionAction {
+    match field.to_ascii_lowercase().as_str() {
+        "prompt" | "generated_text" | "answer" | "bundle_json" | "key_bytes" | "authorization"
+        | "cookie" | "set-cookie" | "set_cookie" | "api_key" | "vi_api_key" => {
+            RedactionAction::Drop
+        }
+        "receipt_bytes" | "audit_bytes" => RedactionAction::BytesPrefixAtTrace,
+        "args" => RedactionAction::SanitizeArgs,
+        _ => RedactionAction::Keep,
+    }
+}
+
+fn value_to_hex_prefix(value: Value) -> Value {
+    match value {
+        Value::String(value) => Value::String(hex_prefix(value.as_bytes())),
+        Value::Array(values) => {
+            let bytes: Vec<u8> = values
+                .into_iter()
+                .filter_map(|value| value.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+                .collect();
+            Value::String(hex_prefix(&bytes))
+        }
+        value => Value::String(hex_prefix(value.to_string().as_bytes())),
+    }
+}
+
+fn hex_prefix(bytes: &[u8]) -> String {
+    const PREFIX_BYTES: usize = 32;
+    let mut output = String::with_capacity(PREFIX_BYTES * 2 + 3);
+    for byte in bytes.iter().take(PREFIX_BYTES) {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    if bytes.len() > PREFIX_BYTES {
+        output.push_str("...");
+    }
+    output
+}
+
+fn sanitize_args_value(value: Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(sanitize_args(values)),
+        Value::String(value) => Value::String(sanitize_args_string(&value)),
+        value => Value::String(sanitize_args_string(&value.to_string())),
+    }
+}
+
+fn sanitize_args(values: Vec<Value>) -> Vec<Value> {
+    let mut sanitized = Vec::with_capacity(values.len());
+    let mut redact_next = false;
+
+    for value in values {
+        let Some(token) = value.as_str() else {
+            sanitized.push(value);
+            continue;
+        };
+
+        if redact_next {
+            sanitized.push(Value::String("[REDACTED]".to_owned()));
+            redact_next = false;
+            continue;
+        }
+
+        if token == "--api-key" {
+            sanitized.push(Value::String(token.to_owned()));
+            redact_next = true;
+        } else if token.starts_with("--api-key=") {
+            sanitized.push(Value::String("--api-key=[REDACTED]".to_owned()));
+        } else if token.to_ascii_uppercase().starts_with("VI_API_KEY=") {
+            sanitized.push(Value::String("VI_API_KEY=[REDACTED]".to_owned()));
+        } else {
+            sanitized.push(Value::String(token.to_owned()));
+        }
+    }
+
+    sanitized
+}
+
+fn sanitize_args_string(value: &str) -> String {
+    let tokens = value
+        .split_whitespace()
+        .map(|token| Value::String(token.to_owned()))
+        .collect();
+    sanitize_args(tokens)
+        .into_iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map_or_else(|| value.to_string(), ToOwned::to_owned)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[derive(Debug)]
 struct JsonFieldVisitor {
     fields: Map<String, Value>,
+    level: Level,
 }
 
 impl JsonFieldVisitor {
+    fn new(level: Level) -> Self {
+        Self {
+            fields: Map::new(),
+            level,
+        }
+    }
+
     fn into_fields(self) -> Map<String, Value> {
         self.fields
     }
 
     fn insert(&mut self, field: &Field, value: Value) {
-        self.fields.insert(field.name().to_owned(), value);
+        if let Some(value) = RedactionLayer::redact_value(field.name(), value, self.level) {
+            self.fields.insert(field.name().to_owned(), value);
+        }
     }
 }
 
@@ -231,6 +382,12 @@ impl Visit for JsonFieldVisitor {
 
     fn record_str(&mut self, field: &Field, value: &str) {
         self.insert(field, Value::String(value.to_owned()));
+    }
+
+    fn record_bytes(&mut self, field: &Field, value: &[u8]) {
+        if let Some(value) = RedactionLayer::redact_bytes(field.name(), value, self.level) {
+            self.fields.insert(field.name().to_owned(), value);
+        }
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
@@ -348,6 +505,127 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let value: Value = serde_json::from_str(&lines[0]).expect("log line is JSON");
         assert_eq!(value["event"], "process.error");
+    }
+
+    #[test]
+    fn redaction_policy_covers_field_map_at_info_debug_and_trace() {
+        let levels = [Level::INFO, Level::DEBUG, Level::TRACE];
+        let cases = [
+            ("prompt", RedactionAction::Drop),
+            ("prompt_hash", RedactionAction::Keep),
+            ("generated_text", RedactionAction::Drop),
+            ("answer", RedactionAction::Drop),
+            ("answer_hash", RedactionAction::Keep),
+            ("text_chars", RedactionAction::Keep),
+            ("key_bytes", RedactionAction::Drop),
+            ("receipt_bytes", RedactionAction::BytesPrefixAtTrace),
+            ("audit_bytes", RedactionAction::BytesPrefixAtTrace),
+            ("authorization", RedactionAction::Drop),
+            ("cookie", RedactionAction::Drop),
+            ("set-cookie", RedactionAction::Drop),
+            ("api_key", RedactionAction::Drop),
+            ("VI_API_KEY", RedactionAction::Drop),
+            ("args", RedactionAction::SanitizeArgs),
+        ];
+
+        for level in levels {
+            for (field, action) in cases {
+                let output = RedactionLayer::redact_value(field, sample_value(field), level);
+                match action {
+                    RedactionAction::Keep => assert!(output.is_some(), "{field} at {level}"),
+                    RedactionAction::Drop => assert!(output.is_none(), "{field} at {level}"),
+                    RedactionAction::BytesPrefixAtTrace => {
+                        if level == Level::TRACE {
+                            assert_eq!(
+                                output.expect("TRACE byte prefix").as_str(),
+                                Some("7365637265742d6279746573")
+                            );
+                        } else {
+                            assert!(output.is_none(), "{field} at {level}");
+                        }
+                    }
+                    RedactionAction::SanitizeArgs => {
+                        let output = output.expect("args are sanitized");
+                        let rendered = output.to_string();
+                        assert!(!rendered.contains("secret-token"));
+                        assert!(rendered.contains("[REDACTED]"));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn info_prompt_misuse_does_not_emit_prompt() {
+        let buffer = SharedBuffer::default();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_target(false)
+                .with_current_span(false)
+                .with_span_list(false)
+                .with_writer(buffer.clone())
+                .event_format(ViEventFormatter::new("chat", "trace-test"))
+                .with_filter(EnvFilter::new("info")),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(
+                event = "chat.request",
+                prompt = "raw user prompt",
+                prompt_hash = "sha256:prompt"
+            );
+        });
+
+        let lines = buffer.lines();
+        assert_eq!(lines.len(), 1);
+        assert!(!lines[0].contains("raw user prompt"));
+        let value: Value = serde_json::from_str(&lines[0]).expect("log line is JSON");
+        assert!(value.get("prompt").is_none());
+        assert_eq!(value["prompt_hash"], "sha256:prompt");
+    }
+
+    #[test]
+    fn trace_byte_fields_emit_hex_prefix_only() {
+        let buffer = SharedBuffer::default();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_target(false)
+                .with_current_span(false)
+                .with_span_list(false)
+                .with_writer(buffer.clone())
+                .event_format(ViEventFormatter::new("verify", "trace-test"))
+                .with_filter(EnvFilter::new("trace")),
+        );
+        let bytes: Vec<u8> = (0..40).collect();
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::trace!(
+                event = "verify.bytes",
+                receipt_bytes = bytes.as_slice(),
+                audit_bytes = bytes.as_slice()
+            );
+        });
+
+        let lines = buffer.lines();
+        assert_eq!(lines.len(), 1);
+        let value: Value = serde_json::from_str(&lines[0]).expect("log line is JSON");
+        let expected = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f...";
+        assert_eq!(value["receipt_bytes"], expected);
+        assert_eq!(value["audit_bytes"], expected);
+        assert!(!value["receipt_bytes"]
+            .as_str()
+            .expect("receipt prefix is a string")
+            .contains("202122"));
+    }
+
+    fn sample_value(field: &str) -> Value {
+        match field {
+            "args" => serde_json::json!(["vi", "chat", "--api-key", "secret-token"]),
+            "receipt_bytes" | "audit_bytes" => Value::String("secret-bytes".to_owned()),
+            _ => Value::String(format!("sample-{field}")),
+        }
     }
 
     #[derive(Debug, Clone, Default)]
