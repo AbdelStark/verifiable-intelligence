@@ -69,7 +69,7 @@ The old Rust CLI/keygen/verifier crates remain implementation assets. The old Ru
 
 | ID | Question | Default | Resolution trigger |
 |----|----------|---------|--------------------|
-| OQ-1 | Repository organization | personal repo | Before public release |
+| OQ-1 | Repository organization | Resolved for v1: keep `AbdelStark/verifiable-intelligence`; no institutional transfer before the marketplace proof-demo release | Reopen only if a public-release sponsor requires an org move |
 | OQ-2 | Reference model | Resolved for v1: `llama-3.1-8b-w8a8` with CommitLLM profile `llama-w8a8-audited` at pin `25541e83`; see [`docs/spikes/reference-model.md`](./docs/spikes/reference-model.md) | Provider integration uses this selection |
 | OQ-3 | Browser verifier strategy | WASM wrapper over CommitLLM verifier if feasible; server-side verification fallback only for prototype | WASM spike |
 | OQ-4 | Public hosted demo | Static demo public, live GPU endpoint gated by cost | Before public release |
