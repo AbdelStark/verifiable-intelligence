@@ -10,10 +10,11 @@
     "test:release": "node scripts/test-release-comprehension.js",
     "test:pin": "node scripts/ci/check-commitllm-pin.js",
     "test:provider": "node scripts/test-provider-entrypoint.js",
+    "test:changelog-pin": "node scripts/ci/check-changelog-pin.js --self-test && node scripts/ci/check-changelog-pin.js",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
     "test:broker": "node scripts/test-broker-api.js",
-    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker && npm run test:provider && npm run test:docs && npm run test:release && npm run test:pin"
+    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker && npm run test:provider && npm run test:docs && npm run test:release && npm run test:pin && npm run test:changelog-pin"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
