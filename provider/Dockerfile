@@ -70,6 +70,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=provider-builder /opt/wheelhouse /opt/wheelhouse
+COPY provider/entrypoint.sh /entrypoint.sh
+COPY provider/healthz.py /healthz.py
 
 RUN python3 -m venv /opt/provider-venv \
     && /opt/provider-venv/bin/python -m pip install \
@@ -79,7 +81,9 @@ RUN python3 -m venv /opt/provider-venv \
         verilm \
     && rm -rf /root/.cache/pip
 
+RUN chmod +x /entrypoint.sh /healthz.py
+
 WORKDIR /srv/provider
 EXPOSE 8000
 
-CMD ["python3", "-c", "print('verifiable-intelligence provider image skeleton ready')"]
+ENTRYPOINT ["/entrypoint.sh"]
