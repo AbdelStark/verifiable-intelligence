@@ -1,10 +1,19 @@
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const entrypoint = path.join(root, 'provider', 'entrypoint.sh');
+const commitllmShort = readCommitllmShort();
+
+function readCommitllmShort() {
+  const lock = fs.readFileSync(path.join(root, 'commitllm.lock'), 'utf8');
+  const match = lock.match(/^commitllm_short\s*=\s*"([^"]+)"$/m);
+  assert.ok(match, 'commitllm.lock must define commitllm_short');
+  return match[1];
+}
 
 function zeroes(char) {
   return `sha256:${char.repeat(64)}`;
@@ -108,7 +117,7 @@ async function oneShotStubExitsCleanly() {
   const ready = event(run.logs, 'provider.ready');
   const shutdown = event(run.logs, 'provider.shutdown');
   assert.equal(boot.model_id, 'llama-3.1-8b-w8a8');
-  assert.equal(boot.commitllm_pin, '25541e83');
+  assert.equal(boot.commitllm_pin, commitllmShort);
   assert.equal(boot.checkpoint_hash, zeroes('1'));
   assert.equal(boot.key_hash, zeroes('2'));
   assert.equal(boot.max_num_seqs, 8);
@@ -134,7 +143,7 @@ async function sigtermShutsDownCleanly() {
   assert.equal(health.model_id, 'llama-3.1-8b-w8a8');
   assert.equal(health.checkpoint_hash, zeroes('3'));
   assert.equal(health.key_hash, zeroes('4'));
-  assert.equal(health.commitllm_pin, '25541e83');
+  assert.equal(health.commitllm_pin, commitllmShort);
 
   run.child.kill('SIGTERM');
   const result = await run.exit;
