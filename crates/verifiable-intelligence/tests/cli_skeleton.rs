@@ -87,6 +87,20 @@ fn chat_help_lists_public_flags() {
 }
 
 #[test]
+fn tui_help_lists_public_flags() {
+    let output = vi_command()
+        .args(["tui", "--help"])
+        .output()
+        .expect("vi should run");
+
+    assert!(output.status.success());
+    let stdout = stdout_utf8(&output);
+    assert!(stdout.contains("--endpoint <URL>"));
+    assert!(stdout.contains("--tamper <MODE>"));
+    assert!(stdout.contains("--phase-delay <MS>"));
+}
+
+#[test]
 fn verify_help_lists_public_flags() {
     let output = vi_command()
         .args(["verify", "--help"])

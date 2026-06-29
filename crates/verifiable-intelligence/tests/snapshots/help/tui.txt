@@ -3,9 +3,11 @@ Run the deferred terminal demo UI
 Usage: vi tui [OPTIONS]
 
 Options:
-  -e, --endpoint <URL>   Provider or broker endpoint; defaults to VI_ENDPOINT
-      --pretty           Format the same output object for humans instead of compact JSON
-      --log <FILTER>     Log filter; overrides VI_LOG and RUST_LOG
-      --api-key <TOKEN>  Provider API key; VI_API_KEY is preferred
-      --no-color         Disable ANSI color in pretty output
-  -h, --help             Print help
+  -e, --endpoint <URL>    Provider or broker endpoint; defaults to VI_ENDPOINT
+      --pretty            Format the same output object for humans instead of compact JSON
+      --log <FILTER>      Log filter; overrides VI_LOG and RUST_LOG
+      --tamper <MODE>     Tamper mode for the next request: byte-flip
+      --api-key <TOKEN>   Provider API key; VI_API_KEY is preferred
+      --phase-delay <MS>  Delay between verifier phases in milliseconds [default: 0]
+      --no-color          Disable ANSI color in pretty output
+  -h, --help              Print help
