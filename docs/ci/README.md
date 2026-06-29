@@ -28,7 +28,9 @@ update this page in the same pull request.
 - `proof-bundle`: `npm run test:bundle`.
 - `browser-demo`: Playwright Chromium tests through `npm run test:demo`.
 - `size-budget`: `npm run test:size-budget` with `reports/perf/` uploaded.
-- `provider-image`: Docker provider image smoke only when `provider/` changes.
+- `provider-image`: Docker provider image build, CPU-stub smoke, size gate, and
+  image ID/digest summary when `provider/` or the provider-image workflow
+  changes.
 - `supply-chain`: `scripts/ci/deny.sh`.
 - `secret-scan`: `npm run test:secret-scan`.
 

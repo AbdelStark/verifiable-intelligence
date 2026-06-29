@@ -25,6 +25,11 @@ as measured on 2026-06-29. The full `llama-3.2-1b-w8a8` key remains a measured
 artifact once a canonical fixture exists; the CI gate is deliberately wired to
 the reproducible fixture that exists in this repository today.
 
+The `provider-image` job runs when `provider/` or its CI workflow changes. It
+records `reports/ci/provider-image-size.log` with the final Docker image size,
+the 8 GiB hard limit, the local image ID, and repo digests when Docker has them.
+The job fails if the final image exceeds `8589934592` bytes.
+
 ## CLI-Only Build Budget
 
 The umbrella crate exposes a `tui` feature that defaults on. Disabling default
