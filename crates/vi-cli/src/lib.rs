@@ -225,6 +225,21 @@ struct TuiArgs {
         help = "Provider or broker endpoint; defaults to VI_ENDPOINT"
     )]
     endpoint: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "MODE",
+        help = "Tamper mode for the next request: byte-flip"
+    )]
+    tamper: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "MS",
+        default_value_t = 0,
+        help = "Delay between verifier phases in milliseconds"
+    )]
+    phase_delay: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -337,7 +352,7 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
         Some(CliCommand::Keygen(args)) => run_keygen(args, &config),
         Some(CliCommand::Chat(args)) => run_chat(&args, &config),
         Some(CliCommand::Verify(args)) => run_verify(&args, &config),
-        Some(CliCommand::Tui(_)) => run_tui_stub(&config),
+        Some(CliCommand::Tui(args)) => run_tui(&args, &config),
         Some(CliCommand::Panic) => {
             ensure_test_hooks_enabled()?;
             panic!("deliberate vi panic test hook");
@@ -354,20 +369,49 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
     }
 }
 
-fn run_tui_stub(config: &ResolvedConfig) -> Result<Output, ViError> {
+fn run_tui(args: &TuiArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
     #[cfg(feature = "tui")]
     {
-        vi_tui::placeholder();
-        stub_output("tui", config)
+        let tamper = parse_tui_tamper(args.tamper.as_deref())?;
+        let report = vi_tui::run(vi_tui::RunOptions::new(
+            config.endpoint.clone(),
+            tamper,
+            args.phase_delay,
+        ))?;
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "subcommand": "tui",
+            "status": report.status,
+            "endpoint": report.endpoint,
+            "tamper": report.tamper.map(vi_tui::TamperMode::as_str),
+            "phase_delay_ms": report.phase_delay_ms,
+        });
+        json_output(&value, config, "tui")
     }
 
     #[cfg(not(feature = "tui"))]
     {
-        let _ = config;
+        let _ = (args, config);
         Err(ViError::UnsupportedTier {
             requested: "tui".to_owned(),
             reason: "the vi binary was built without the tui feature".to_owned(),
         })
+    }
+}
+
+#[cfg(feature = "tui")]
+fn parse_tui_tamper(value: Option<&str>) -> Result<Option<vi_tui::TamperMode>, ViError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    match value {
+        "byte-flip" | "byte_flip" => Ok(Some(vi_tui::TamperMode::ByteFlip)),
+        _ => Err(ViError::Input {
+            arg: "--tamper".to_owned(),
+            reason: "unsupported tamper mode; expected byte-flip".to_owned(),
+            detail: None,
+        }),
     }
 }
 
@@ -648,15 +692,6 @@ fn write_binary_output(path: &Path, bytes: &[u8]) -> Result<(), ViError> {
         reason: format!("failed to write output file: {error}"),
         detail: None,
     })
-}
-
-fn stub_output(subcommand: &'static str, config: &ResolvedConfig) -> Result<Output, ViError> {
-    let value = serde_json::json!({
-        "schema_version": 1,
-        "subcommand": subcommand,
-        "status": "stub",
-    });
-    json_output(&value, config, subcommand)
 }
 
 fn json_output(
@@ -945,6 +980,22 @@ mod tests {
         );
         assert_eq!(flag_config.api_key.as_deref(), Some("flag-token"));
         assert!(flag_config.no_color);
+    }
+
+    #[cfg(not(feature = "tui"))]
+    #[test]
+    fn tui_without_feature_returns_unsupported_tier() {
+        let cli = Cli::try_parse_from(["vi", "tui"]).expect("tui parses");
+
+        let error = run_cli(cli).expect_err("tui should fail without the feature");
+
+        assert_eq!(
+            error,
+            ViError::UnsupportedTier {
+                requested: "tui".to_owned(),
+                reason: "the vi binary was built without the tui feature".to_owned(),
+            }
+        );
     }
 
     fn fake_env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<OsString> + 'a {
