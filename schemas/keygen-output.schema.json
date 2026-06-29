@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verifiable-intelligence.local/schemas/keygen-output.schema.json",
+  "title": "vi keygen output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subcommand",
+    "model_id",
+    "checkpoint_hash",
+    "key_hash",
+    "key_size_bytes",
+    "output",
+    "seed",
+    "commitllm_revision",
+    "commitllm_pin",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of the CLI JSON output contract.",
+      "const": 1
+    },
+    "subcommand": {
+      "description": "CLI subcommand that produced this object.",
+      "const": "keygen"
+    },
+    "model_id": {
+      "description": "Public model identifier bound into the verifier key.",
+      "type": "string",
+      "minLength": 1
+    },
+    "checkpoint_hash": {
+      "description": "Canonical checkpoint hash used for key generation.",
+      "type": "string",
+      "pattern": "^sha256:.+$"
+    },
+    "key_hash": {
+      "description": "SHA-256 digest of the emitted VIKY verifier-key envelope.",
+      "type": "string",
+      "pattern": "^sha256:.+$"
+    },
+    "key_size_bytes": {
+      "description": "Size of the emitted verifier-key envelope in bytes.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "output": {
+      "description": "Destination path where the VIKY verifier-key envelope was written.",
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "description": "Deterministic key-generation seed supplied by the caller.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "commitllm_revision": {
+      "description": "Full CommitLLM git revision used for key generation.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "commitllm_pin": {
+      "description": "Short CommitLLM pin exposed in buyer-facing CLI output.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}$"
+    },
+    "warnings": {
+      "description": "Non-fatal warnings emitted during key generation.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
