@@ -6,7 +6,8 @@
     "test:demo": "playwright test",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
-    "test:bundle": "npm run test:schema && npm run test:tamper"
+    "test:broker": "node scripts/test-broker-api.js",
+    "test:bundle": "npm run test:schema && npm run test:tamper && npm run test:broker"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
