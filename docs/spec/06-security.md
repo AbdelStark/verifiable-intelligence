@@ -60,3 +60,4 @@ This document states the marketplace-demo threat model. CommitLLM owns the proto
 - Answer rewrite tests.
 - Unsupported closed-weight model tests.
 - Browser smoke test that red paths cannot render as pass.
+- Secret scanning in CI with a reviewed false-positive allowlist.

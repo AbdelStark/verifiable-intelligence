@@ -1,8 +1,11 @@
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..', '..');
+const allowlistPath = path.join(root, 'secret-scan.allowlist.json');
 const ignoredDirectories = new Set([
   '.git',
   '.next',
@@ -20,6 +23,7 @@ const ignoredExtensions = new Set([
   '.wasm',
   '.zip',
 ]);
+const millisecondsPerDay = 24 * 60 * 60 * 1000;
 
 const patterns = [
   {
@@ -68,6 +72,10 @@ function lineNumberForOffset(text, offset) {
   return text.slice(0, offset).split(/\r?\n/).length;
 }
 
+function fingerprintMatch(value) {
+  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+}
+
 function scanText(relativePath, text) {
   const findings = [];
   for (const pattern of patterns) {
@@ -77,26 +85,28 @@ function scanText(relativePath, text) {
         file: relativePath,
         line: lineNumberForOffset(text, match.index || 0),
         type: pattern.name,
+        fingerprint: fingerprintMatch(match[0]),
       });
     }
   }
   return findings;
 }
 
-function walk(directory, findings = []) {
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    const absolutePath = path.join(directory, entry.name);
-    const relativePath = path.relative(root, absolutePath);
+function listTrackedFiles() {
+  const output = childProcess.execFileSync('git', ['ls-files', '-z'], {
+    cwd: root,
+    encoding: 'buffer',
+  });
+  return output.toString('utf8').split('\0').filter(Boolean);
+}
+
+function scanFiles(relativePaths) {
+  const findings = [];
+  for (const relativePath of relativePaths) {
     if (shouldIgnore(relativePath)) {
       continue;
     }
-    if (entry.isDirectory()) {
-      walk(absolutePath, findings);
-      continue;
-    }
-    if (!entry.isFile()) {
-      continue;
-    }
+    const absolutePath = path.join(root, relativePath);
     const buffer = fs.readFileSync(absolutePath);
     if (isProbablyBinary(buffer)) {
       continue;
@@ -106,11 +116,84 @@ function walk(directory, findings = []) {
   return findings;
 }
 
+function parseDateOnly(value, fieldName) {
+  assert.match(value, /^\d{4}-\d{2}-\d{2}$/, `${fieldName} must be YYYY-MM-DD`);
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  assert.equal(parsed.toISOString().slice(0, 10), value, `${fieldName} is invalid`);
+  return parsed;
+}
+
+function normalizeAllowlist(config, now = new Date()) {
+  assert.equal(typeof config, 'object', 'secret scan allowlist must be an object');
+  assert.notEqual(config, null, 'secret scan allowlist must be an object');
+
+  const reviewedAt = parseDateOnly(config.reviewed_at, 'reviewed_at');
+  assert.equal(
+    Number.isInteger(config.review_interval_days),
+    true,
+    'review_interval_days must be an integer'
+  );
+  assert.ok(
+    config.review_interval_days > 0 && config.review_interval_days <= 365,
+    'review_interval_days must be between 1 and 365'
+  );
+
+  const staleAfter = new Date(
+    reviewedAt.getTime() + config.review_interval_days * millisecondsPerDay
+  );
+  if (now.getTime() > staleAfter.getTime()) {
+    throw new Error(
+      `secret scan allowlist review is stale: reviewed_at ${config.reviewed_at}, interval ${config.review_interval_days} days`
+    );
+  }
+
+  assert.equal(Array.isArray(config.entries), true, 'entries must be an array');
+  return {
+    entries: config.entries.map((entry, index) => {
+      assert.equal(typeof entry.path, 'string', `entries[${index}].path must be a string`);
+      assert.equal(typeof entry.type, 'string', `entries[${index}].type must be a string`);
+      assert.match(
+        entry.fingerprint,
+        /^sha256:[a-f0-9]{64}$/,
+        `entries[${index}].fingerprint must be a sha256 fingerprint`
+      );
+      assert.equal(typeof entry.reason, 'string', `entries[${index}].reason must be a string`);
+      assert.ok(entry.reason.trim().length > 0, `entries[${index}].reason must not be empty`);
+      return {
+        path: entry.path,
+        type: entry.type,
+        fingerprint: entry.fingerprint,
+      };
+    }),
+  };
+}
+
+function loadAllowlist() {
+  const raw = fs.readFileSync(allowlistPath, 'utf8');
+  return normalizeAllowlist(JSON.parse(raw));
+}
+
+function isAllowed(finding, allowlist) {
+  return allowlist.entries.some(
+    (entry) =>
+      entry.path === finding.file &&
+      entry.type === finding.type &&
+      entry.fingerprint === finding.fingerprint
+  );
+}
+
+function filterAllowedFindings(findings, allowlist) {
+  return findings.filter((finding) => !isAllowed(finding, allowlist));
+}
+
 function runScan() {
-  const findings = walk(root);
+  const allowlist = loadAllowlist();
+  const findings = filterAllowedFindings(scanFiles(listTrackedFiles()), allowlist);
   if (findings.length) {
     for (const finding of findings) {
-      console.error(`${finding.file}:${finding.line}: potential ${finding.type}`);
+      console.error(
+        `${finding.file}:${finding.line}: potential ${finding.type} (${finding.fingerprint})`
+      );
     }
     throw new Error(`secret scan found ${findings.length} potential secret(s)`);
   }
@@ -119,11 +202,8 @@ function runScan() {
 
 function runSelfTest() {
   assert.deepEqual(scanText('docs/example.md', 'export HF_TOKEN="hf_..."'), []);
-  assert.equal(
-    scanText('leak.txt', `token=ghp_${'a'.repeat(36)}`).length,
-    1,
-    'GitHub token shape should be detected'
-  );
+  const githubFinding = scanText('leak.txt', `token=ghp_${'a'.repeat(36)}`)[0];
+  assert.equal(githubFinding.type, 'github-token', 'GitHub token shape should be detected');
   assert.equal(
     scanText('leak.txt', `token=hf_${'a'.repeat(30)}`).length,
     1,
@@ -133,6 +213,41 @@ function runSelfTest() {
     scanText('leak.txt', `-----BEGIN ${'PRIVATE'} KEY-----`).length,
     1,
     'private key header should be detected'
+  );
+  assert.deepEqual(
+    filterAllowedFindings(
+      [githubFinding],
+      normalizeAllowlist(
+        {
+          reviewed_at: '2026-06-29',
+          review_interval_days: 90,
+          entries: [
+            {
+              path: 'leak.txt',
+              type: githubFinding.type,
+              fingerprint: githubFinding.fingerprint,
+              reason: 'self-test fake token',
+            },
+          ],
+        },
+        new Date('2026-06-30T00:00:00.000Z')
+      )
+    ),
+    [],
+    'allowlisted findings should be suppressed'
+  );
+  assert.throws(
+    () =>
+      normalizeAllowlist(
+        {
+          reviewed_at: '2026-01-01',
+          review_interval_days: 1,
+          entries: [],
+        },
+        new Date('2026-06-30T00:00:00.000Z')
+      ),
+    /stale/,
+    'stale allowlist review should fail'
   );
   console.log('secret scan self-test passed');
 }
@@ -151,5 +266,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  filterAllowedFindings,
+  normalizeAllowlist,
   scanText,
 };
