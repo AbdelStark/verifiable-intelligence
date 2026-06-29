@@ -53,6 +53,14 @@ license-files = [
     { path = "../../LICENSE", hash = 0x5731f966 },
 ]
 
+[[licenses.clarify]]
+name = "verilm-keygen"
+version = "0.1.0"
+expression = "MIT"
+license-files = [
+    { path = "../../LICENSE", hash = 0x5731f966 },
+]
+
 [bans]
 multiple-versions = "allow"
 wildcards = "deny"
