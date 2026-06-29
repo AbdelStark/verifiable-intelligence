@@ -12,5 +12,8 @@ publish.workspace = true
 [dependencies]
 vi-errors = { path = "../vi-errors" }
 
+[dev-dependencies]
+proptest = "=1.6.0"
+
 [lints]
 workspace = true

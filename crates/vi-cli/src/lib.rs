@@ -57,7 +57,7 @@ pub fn run() -> Result<Output, ViError> {
     vi_client::placeholder();
     vi_keygen::placeholder();
     vi_log::placeholder();
-    vi_receipt::placeholder();
+    let _ = vi_receipt::HEADER_LEN;
     vi_verifier::placeholder();
     #[cfg(feature = "tui")]
     vi_tui::placeholder();
