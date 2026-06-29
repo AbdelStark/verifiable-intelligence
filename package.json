@@ -13,6 +13,8 @@
     "test:changelog-pin": "node scripts/ci/check-changelog-pin.js --self-test && node scripts/ci/check-changelog-pin.js",
     "test:commitllm-rename-watch": "node scripts/ci/watch-commitllm-rename.js --self-test",
     "test:secret-scan": "node scripts/ci/secret-scan.js --self-test && node scripts/ci/secret-scan.js",
+    "test:size-budget": "node scripts/ci/check-size-budgets.js",
+    "bench:browser": "node scripts/ci/collect-browser-perf.js",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
     "test:broker": "node scripts/test-broker-api.js",

@@ -115,6 +115,24 @@ jobs:
             test-results/
             playwright-report/
 
+  size-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Size budget report
+        run: |
+          mkdir -p reports/perf
+          set -o pipefail
+          npm run test:size-budget 2>&1 | tee reports/perf/size-budget.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-size-budget-${{ github.run_id }}
+          path: reports/perf/
+
   provider-image:
     runs-on: ubuntu-latest
     env:

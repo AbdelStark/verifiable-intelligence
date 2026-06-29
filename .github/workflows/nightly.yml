@@ -1,0 +1,35 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  browser-verifier-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Browser verifier benchmark
+        run: |
+          mkdir -p reports/perf
+          set -o pipefail
+          npm run bench:browser 2>&1 | tee reports/perf/browser-verifier.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-browser-verifier-${{ github.run_id }}
+          path: reports/perf/
