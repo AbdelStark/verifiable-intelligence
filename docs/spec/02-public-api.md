@@ -190,6 +190,13 @@ Non-2xx responses are client `network` errors carrying the HTTP status. Verifica
 }
 ```
 
+CLI and integration clients may offer an optional preflight, off by default, that calls
+`/healthz` before chat or verification work. The preflight compares the provider's
+`commitllm_pin` with the client's built-in short pin. A mismatch is non-fatal: emit
+a `WARN` log line and include a warnings-array entry such as
+`commitllm_pin_mismatch: expected 25541e83, actual <provider_pin>` in the eventual
+JSON output, then continue with the requested operation.
+
 ## 5. Utility CLI
 
 The old `vi` CLI remains an implementation utility:

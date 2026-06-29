@@ -31,6 +31,9 @@ pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 /// Provider audit path.
 pub const AUDIT_PATH: &str = "/v1/audit";
 
+/// Provider health preflight path.
+pub const HEALTHZ_PATH: &str = "/healthz";
+
 const RECEIPT_CONTENT_TYPE: &str = "application/vnd.verifiable-intelligence.receipt+binary";
 const MULTIPART_MIXED: &str = "multipart/mixed";
 
@@ -138,6 +141,41 @@ impl ChatClient {
         })
     }
 
+    /// GET provider health metadata from `/healthz`.
+    pub fn get_healthz(&self) -> Result<ProviderHealth, ViError> {
+        let url = self.healthz_url()?;
+        let response = self
+            .client
+            .get(url.clone())
+            .headers(self.auth_headers()?)
+            .send()
+            .map_err(|error| network_error(url.as_str(), &error))?;
+        let status = response.status();
+
+        if !status.is_success() {
+            return Err(http_status_error(url.as_str(), status.as_u16()));
+        }
+
+        let body = response
+            .bytes()
+            .map_err(|error| network_error(url.as_str(), &error))?;
+        parse_provider_health(&body)
+    }
+
+    /// Optional preflight comparing provider `/healthz` pin with the local pin.
+    pub fn preflight_commitllm_pin(
+        &self,
+        expected_short_pin: &str,
+    ) -> Result<HealthPreflight, ViError> {
+        let healthz_url = self.healthz_url()?.to_string();
+        let health = self.get_healthz()?;
+        Ok(compare_commitllm_pin(
+            health,
+            expected_short_pin,
+            &healthz_url,
+        ))
+    }
+
     fn chat_url(&self) -> Result<Url, ViError> {
         self.endpoint
             .join(CHAT_COMPLETIONS_PATH)
@@ -150,6 +188,12 @@ impl ChatClient {
             .map_err(|error| input_error("endpoint", format!("invalid audit path: {error}")))
     }
 
+    fn healthz_url(&self) -> Result<Url, ViError> {
+        self.endpoint
+            .join(HEALTHZ_PATH)
+            .map_err(|error| input_error("endpoint", format!("invalid healthz path: {error}")))
+    }
+
     fn chat_headers(&self, trace_id: &str) -> Result<HeaderMap, ViError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -160,18 +204,7 @@ impl ChatClient {
                 input_error("trace_id", format!("invalid trace header value: {error}"))
             })?,
         );
-
-        if let Some(api_key) = &self.api_key {
-            let mut value =
-                HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|error| {
-                    input_error(
-                        "VI_API_KEY",
-                        format!("invalid authorization header: {error}"),
-                    )
-                })?;
-            value.set_sensitive(true);
-            headers.insert(AUTHORIZATION, value);
-        }
+        self.insert_authorization(&mut headers)?;
 
         Ok(headers)
     }
@@ -185,7 +218,18 @@ impl ChatClient {
                 input_error("trace_id", format!("invalid trace header value: {error}"))
             })?,
         );
+        self.insert_authorization(&mut headers)?;
 
+        Ok(headers)
+    }
+
+    fn auth_headers(&self) -> Result<HeaderMap, ViError> {
+        let mut headers = HeaderMap::new();
+        self.insert_authorization(&mut headers)?;
+        Ok(headers)
+    }
+
+    fn insert_authorization(&self, headers: &mut HeaderMap) -> Result<(), ViError> {
         if let Some(api_key) = &self.api_key {
             let mut value =
                 HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|error| {
@@ -198,7 +242,7 @@ impl ChatClient {
             headers.insert(AUTHORIZATION, value);
         }
 
-        Ok(headers)
+        Ok(())
     }
 
     #[cfg(test)]
@@ -209,6 +253,32 @@ impl ChatClient {
             client: Client::new(),
         }
     }
+}
+
+/// Provider metadata returned by `/healthz`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderHealth {
+    /// Provider health status, normally `ok`.
+    pub status: String,
+    /// Public model identifier.
+    pub model_id: String,
+    /// Canonical checkpoint hash.
+    pub checkpoint_hash: String,
+    /// Provider-advertised short `CommitLLM` pin.
+    pub commitllm_pin: String,
+    /// Hash of the verifier key advertised by the provider.
+    pub key_hash: String,
+}
+
+/// Result of the optional `/healthz` preflight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HealthPreflight {
+    /// Provider metadata fetched from `/healthz`.
+    pub health: ProviderHealth,
+    /// Non-fatal warnings to include in eventual JSON output.
+    pub warnings: Vec<String>,
+    /// WARN log line to write when warnings are present.
+    pub warn_line: Option<String>,
 }
 
 /// JSON request body for `POST /v1/audit`.
@@ -444,6 +514,67 @@ fn chat_text_from_json(bytes: &[u8]) -> Result<String, ViError> {
         .ok_or_else(|| corrupt_multipart(0, "chat-completion JSON missing message content"))
 }
 
+fn parse_provider_health(bytes: &[u8]) -> Result<ProviderHealth, ViError> {
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|_| corrupt_healthz("healthz JSON is malformed"))?;
+
+    Ok(ProviderHealth {
+        status: required_string(&value, "status")?,
+        model_id: required_string(&value, "model_id")?,
+        checkpoint_hash: required_string(&value, "checkpoint_hash")?,
+        commitllm_pin: required_string(&value, "commitllm_pin")?,
+        key_hash: required_string(&value, "key_hash")?,
+    })
+}
+
+fn required_string(value: &Value, field: &'static str) -> Result<String, ViError> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| corrupt_healthz(missing_healthz_field_reason(field)))
+}
+
+fn missing_healthz_field_reason(field: &str) -> &'static str {
+    match field {
+        "status" => "healthz JSON missing status",
+        "model_id" => "healthz JSON missing model_id",
+        "checkpoint_hash" => "healthz JSON missing checkpoint_hash",
+        "commitllm_pin" => "healthz JSON missing commitllm_pin",
+        "key_hash" => "healthz JSON missing key_hash",
+        _ => "healthz JSON missing required field",
+    }
+}
+
+fn compare_commitllm_pin(
+    health: ProviderHealth,
+    expected_short_pin: &str,
+    endpoint: &str,
+) -> HealthPreflight {
+    if health.commitllm_pin == expected_short_pin {
+        return HealthPreflight {
+            health,
+            warnings: Vec::new(),
+            warn_line: None,
+        };
+    }
+
+    let warning = format!(
+        "commitllm_pin_mismatch: expected {expected_short_pin}, actual {}",
+        health.commitllm_pin
+    );
+    let warn_line = format!(
+        "WARN provider_commitllm_pin_mismatch endpoint={endpoint} expected={expected_short_pin} actual={}",
+        health.commitllm_pin
+    );
+
+    HealthPreflight {
+        health,
+        warnings: vec![warning],
+        warn_line: Some(warn_line),
+    }
+}
+
 fn warning_199(headers: &HeaderMap) -> Option<String> {
     headers.get_all("warning").iter().find_map(|value| {
         let value = value.to_str().ok()?;
@@ -464,6 +595,14 @@ fn corrupt_multipart(offset: usize, reason: &'static str) -> ViError {
     ViError::CorruptEnvelope {
         envelope: "multipart/mixed",
         offset,
+        reason,
+    }
+}
+
+fn corrupt_healthz(reason: &'static str) -> ViError {
+    ViError::CorruptEnvelope {
+        envelope: "healthz",
+        offset: 0,
         reason,
     }
 }
@@ -699,6 +838,54 @@ mod tests {
     }
 
     #[test]
+    fn healthz_preflight_pin_match_is_silent() {
+        let (endpoint, server) = serve_http_once(
+            "HTTP/1.1 200 OK",
+            &[("Content-Type", "application/json")],
+            healthz_body("25541e83"),
+        );
+        let client = http_test_client(&endpoint, None);
+
+        let preflight = client
+            .preflight_commitllm_pin("25541e83")
+            .expect("preflight should succeed");
+        let captured = server.join().expect("server joins");
+
+        assert_eq!(preflight.health.commitllm_pin, "25541e83");
+        assert!(preflight.warnings.is_empty());
+        assert_eq!(preflight.warn_line, None);
+        assert!(captured.starts_with("GET /healthz HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn healthz_preflight_pin_mismatch_warns_without_failing() {
+        let (endpoint, server) = serve_http_once(
+            "HTTP/1.1 200 OK",
+            &[("Content-Type", "application/json")],
+            healthz_body("deadbeef"),
+        );
+        let client = http_test_client(&endpoint, Some("secret-token".to_owned()));
+
+        let preflight = client
+            .preflight_commitllm_pin("25541e83")
+            .expect("mismatch should warn but not fail");
+        let captured = server.join().expect("server joins");
+
+        assert_eq!(
+            preflight.warnings,
+            vec!["commitllm_pin_mismatch: expected 25541e83, actual deadbeef"]
+        );
+        let expected_warn_line =
+            format!("WARN provider_commitllm_pin_mismatch endpoint={endpoint}/healthz expected=25541e83 actual=deadbeef");
+        assert_eq!(
+            preflight.warn_line.as_deref(),
+            Some(expected_warn_line.as_str())
+        );
+        assert!(captured.starts_with("GET /healthz HTTP/1.1\r\n"));
+        assert!(captured.contains("authorization: Bearer secret-token\r\n"));
+    }
+
+    #[test]
     fn multipart_with_json_and_receipt_parses() {
         let response = multipart_response(&[
             (
@@ -807,6 +994,18 @@ mod tests {
             warning: None,
             body,
         }
+    }
+
+    fn healthz_body(commitllm_pin: &str) -> Vec<u8> {
+        serde_json::json!({
+            "status": "ok",
+            "model_id": "llama-3.1-8b-w8a8",
+            "checkpoint_hash": "sha256:checkpoint",
+            "commitllm_pin": commitllm_pin,
+            "key_hash": "sha256:key",
+        })
+        .to_string()
+        .into_bytes()
     }
 
     fn http_test_client(endpoint: &str, api_key: Option<String>) -> ChatClient {
