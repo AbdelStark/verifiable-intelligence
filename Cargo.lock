@@ -1706,6 +1706,9 @@ dependencies = [
 name = "vi-verifier"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
+ "sha2",
+ "verilm-core",
  "verilm-verify",
  "vi-errors",
  "vi-receipt",
