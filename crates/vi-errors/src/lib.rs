@@ -4,6 +4,11 @@
 
 use std::fmt;
 
+use serde_json::{Map, Value};
+
+/// Stable schema version for stderr error envelopes.
+pub const ERROR_ENVELOPE_SCHEMA_VERSION: u16 = 1;
+
 /// Stable error category strings in exit-code order, excluding process-level
 /// `usage` and `sigint` outcomes handled outside `ViError`.
 pub const CATEGORY_STRINGS: [&str; 10] = [
@@ -24,6 +29,57 @@ pub const USAGE_EXIT_CODE: i32 = 64;
 
 /// Canonical process exit code for SIGINT interruption.
 pub const SIGINT_EXIT_CODE: i32 = 130;
+
+const DEFAULT_SUBCOMMAND: &str = "";
+const DEFAULT_TRACE_ID: &str = "";
+
+/// Serializable stderr error envelope emitted by CLI boundaries.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ErrorEnvelope<'a> {
+    /// Always true for error envelopes.
+    pub error: bool,
+    /// Error envelope schema version.
+    pub schema_version: u16,
+    /// Subcommand that produced the error.
+    pub subcommand: &'a str,
+    /// Stable error category string.
+    pub category: &'static str,
+    /// Process exit code for this error.
+    pub exit_code: i32,
+    /// Human-readable error message.
+    pub message: String,
+    /// Category-specific machine-readable detail.
+    pub detail: Value,
+    /// Canonical remediation hint for this error category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<&'static str>,
+    /// Per-process trace identifier for log correlation.
+    pub trace_id: &'a str,
+}
+
+impl<'a> ErrorEnvelope<'a> {
+    /// Build an error envelope while preserving the caller's `trace_id`.
+    #[must_use]
+    pub fn new(subcommand: &'a str, trace_id: &'a str, error: &ViError) -> Self {
+        Self {
+            error: true,
+            schema_version: ERROR_ENVELOPE_SCHEMA_VERSION,
+            subcommand,
+            category: error.category(),
+            exit_code: error.exit_code(),
+            message: error.to_string(),
+            detail: error_detail(error),
+            remediation: Some(error.remediation()),
+            trace_id,
+        }
+    }
+}
+
+impl From<&ViError> for ErrorEnvelope<'static> {
+    fn from(error: &ViError) -> Self {
+        Self::new(DEFAULT_SUBCOMMAND, DEFAULT_TRACE_ID, error)
+    }
+}
 
 /// Typed error taxonomy for all library errors that reach a CLI boundary.
 #[derive(Debug, Clone, PartialEq)]
@@ -144,6 +200,37 @@ impl ViError {
             Self::UnsupportedTier { .. } => 8,
             Self::CorruptEnvelope { .. } => 9,
             Self::Internal { .. } => 70,
+        }
+    }
+
+    /// Canonical remediation hint for this error category.
+    #[must_use]
+    pub const fn remediation(&self) -> &'static str {
+        match self {
+            Self::Input { .. } => "Check the argument value or file path.",
+            Self::Network { .. } => {
+                "Check the endpoint URL and network connectivity; retry on transient failures."
+            }
+            Self::VerificationFailed { .. } => {
+                "Re-fetch the receipt; if the failure persists, the provider's deployment may have drifted from the pinned model."
+            }
+            Self::IdentityMismatch { .. } => {
+                "Use the verifier key that matches this receipt's model and CommitLLM pin."
+            }
+            Self::UnknownVersion { .. } => "Upgrade `vi` or downgrade the provider so versions align.",
+            Self::UnsupportedTier { .. } => {
+                "Use a supported tier or provide the missing inputs (e.g., `--audit-endpoint`)."
+            }
+            Self::CorruptEnvelope { .. } => {
+                "The artifact has been damaged. Re-fetch the original."
+            }
+            Self::HashMismatch { .. } => {
+                "The checkpoint at the source has changed. Re-download or use `--allow-checkpoint-drift` if you are intentionally pinning."
+            }
+            Self::ReceiptMissing { .. } => {
+                "The provider did not emit a receipt. Check that the endpoint supports `X-Verifiable-Receipt: 1` and that the prover is healthy."
+            }
+            Self::Internal { .. } => "Please file an issue with the trace_id.",
         }
     }
 }
@@ -335,15 +422,131 @@ impl fmt::Display for IdentityFields {
     }
 }
 
+fn error_detail(error: &ViError) -> Value {
+    match error {
+        ViError::Input {
+            arg,
+            reason,
+            detail,
+        } => input_detail(arg, reason, detail.as_ref()),
+        ViError::Network {
+            endpoint,
+            kind,
+            http_status,
+        } => serde_json::json!({
+            "endpoint": endpoint,
+            "kind": kind.as_str(),
+            "http_status": http_status,
+        }),
+        ViError::VerificationFailed {
+            phase,
+            measured,
+            tolerance,
+            extra,
+        } => serde_json::json!({
+            "phase": phase.as_str(),
+            "measured": measured,
+            "tolerance": tolerance,
+            "extra": extra,
+        }),
+        ViError::IdentityMismatch { expected, actual } => serde_json::json!({
+            "expected": identity_detail(expected),
+            "actual": identity_detail(actual),
+        }),
+        ViError::UnknownVersion {
+            envelope,
+            field,
+            value,
+            supported,
+        } => serde_json::json!({
+            "envelope": envelope,
+            "field": field,
+            "value": value,
+            "supported": supported,
+        }),
+        ViError::UnsupportedTier { requested, reason } => serde_json::json!({
+            "requested_tier": requested,
+            "reason": reason,
+        }),
+        ViError::CorruptEnvelope {
+            envelope,
+            offset,
+            reason,
+        } => serde_json::json!({
+            "envelope": envelope,
+            "offset": offset,
+            "reason": reason,
+        }),
+        ViError::HashMismatch { expected, actual } => serde_json::json!({
+            "expected": expected,
+            "actual": actual,
+        }),
+        ViError::ReceiptMissing {
+            endpoint,
+            content_type,
+        } => serde_json::json!({
+            "endpoint": endpoint,
+            "content_type": content_type,
+            "expected": "multipart/mixed",
+        }),
+        ViError::Internal { backtrace } => serde_json::json!({
+            "backtrace": backtrace,
+        }),
+    }
+}
+
+fn input_detail(arg: &str, reason: &str, detail: Option<&Value>) -> Value {
+    let mut fields = Map::new();
+    fields.insert("arg".to_owned(), Value::String(arg.to_owned()));
+    fields.insert("reason".to_owned(), Value::String(reason.to_owned()));
+
+    match detail {
+        Some(Value::Object(extra)) => {
+            for (key, value) in extra {
+                if !fields.contains_key(key) {
+                    fields.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        Some(value) => {
+            fields.insert("detail".to_owned(), value.clone());
+        }
+        None => {}
+    }
+
+    Value::Object(fields)
+}
+
+fn identity_detail(identity: &IdentityFields) -> Value {
+    serde_json::json!({
+        "model_id": identity.model_id,
+        "checkpoint_hash": identity.checkpoint_hash,
+        "commitllm_pin": identity.commitllm_pin,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        IdentityFields, NetworkErrorKind, PhaseId, ViError, CATEGORY_STRINGS, SIGINT_EXIT_CODE,
-        USAGE_EXIT_CODE,
+        ErrorEnvelope, IdentityFields, NetworkErrorKind, PhaseId, ViError, CATEGORY_STRINGS,
+        ERROR_ENVELOPE_SCHEMA_VERSION, SIGINT_EXIT_CODE, USAGE_EXIT_CODE,
     };
+    use serde_json::{json, Value};
+
+    const SUBCOMMAND: &str = "verify";
+    const TRACE_ID: &str = "01JTRACE";
 
     fn sample_identity() -> IdentityFields {
         IdentityFields::new("model", "sha256:abc", "25541e83")
+    }
+
+    fn envelope_value(error: &ViError) -> Value {
+        serde_json::to_value(ErrorEnvelope::new(SUBCOMMAND, TRACE_ID, error))
+            .expect("error envelope should serialize")
+    }
+
+    fn assert_envelope(error: &ViError, expected: &Value) {
+        assert_eq!(&envelope_value(error), expected);
     }
 
     fn sample_errors() -> Vec<ViError> {
@@ -494,6 +697,279 @@ mod tests {
                 "http_status",
                 "other",
             ]
+        );
+    }
+
+    #[test]
+    fn error_envelope_from_error_uses_default_context() {
+        let envelope = ErrorEnvelope::from(&ViError::Internal {
+            backtrace: "panic".to_owned(),
+        });
+
+        assert!(envelope.error);
+        assert_eq!(envelope.schema_version, ERROR_ENVELOPE_SCHEMA_VERSION);
+        assert_eq!(envelope.subcommand, "");
+        assert_eq!(envelope.trace_id, "");
+    }
+
+    #[test]
+    fn serializes_input_envelope() {
+        assert_envelope(
+            &ViError::Input {
+                arg: "--receipt".to_owned(),
+                reason: "file not found".to_owned(),
+                detail: Some(json!({ "path": "./receipt.bin" })),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "input",
+                "exit_code": 2,
+                "message": "invalid input for --receipt: file not found",
+                "detail": {
+                    "arg": "--receipt",
+                    "path": "./receipt.bin",
+                    "reason": "file not found",
+                },
+                "remediation": "Check the argument value or file path.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_network_envelope() {
+        assert_envelope(
+            &ViError::Network {
+                endpoint: "https://provider.example".to_owned(),
+                kind: NetworkErrorKind::Timeout,
+                http_status: None,
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "network",
+                "exit_code": 3,
+                "message": "network error calling https://provider.example: timeout",
+                "detail": {
+                    "endpoint": "https://provider.example",
+                    "http_status": null,
+                    "kind": "timeout",
+                },
+                "remediation": "Check the endpoint URL and network connectivity; retry on transient failures.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_verification_failed_envelope() {
+        assert_envelope(
+            &ViError::VerificationFailed {
+                phase: PhaseId::BridgeReplay,
+                measured: Some(47.0),
+                tolerance: Some(10.0),
+                extra: Some(json!({ "norm": "L_inf" })),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "verification_failed",
+                "exit_code": 1,
+                "message": "verification phase bridge_replay failed: measured 47 exceeds tolerance 10",
+                "detail": {
+                    "extra": { "norm": "L_inf" },
+                    "measured": 47.0,
+                    "phase": "bridge_replay",
+                    "tolerance": 10.0,
+                },
+                "remediation": "Re-fetch the receipt; if the failure persists, the provider's deployment may have drifted from the pinned model.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_identity_mismatch_envelope() {
+        assert_envelope(
+            &ViError::IdentityMismatch {
+                expected: sample_identity(),
+                actual: IdentityFields::new("other-model", "sha256:def", "25541e83"),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "identity_mismatch",
+                "exit_code": 7,
+                "message": "identity mismatch: expected model_id=model, checkpoint_hash=sha256:abc, commitllm_pin=25541e83, actual model_id=other-model, checkpoint_hash=sha256:def, commitllm_pin=25541e83",
+                "detail": {
+                    "actual": {
+                        "checkpoint_hash": "sha256:def",
+                        "commitllm_pin": "25541e83",
+                        "model_id": "other-model",
+                    },
+                    "expected": {
+                        "checkpoint_hash": "sha256:abc",
+                        "commitllm_pin": "25541e83",
+                        "model_id": "model",
+                    },
+                },
+                "remediation": "Use the verifier key that matches this receipt's model and CommitLLM pin.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_unknown_version_envelope() {
+        assert_envelope(
+            &ViError::UnknownVersion {
+                envelope: "VIRC",
+                field: "ver",
+                value: 9,
+                supported: vec![1],
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "unknown_version",
+                "exit_code": 6,
+                "message": "unsupported VIRC ver version 9; supported versions: [1]",
+                "detail": {
+                    "envelope": "VIRC",
+                    "field": "ver",
+                    "supported": [1],
+                    "value": 9,
+                },
+                "remediation": "Upgrade `vi` or downgrade the provider so versions align.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_unsupported_tier_envelope() {
+        assert_envelope(
+            &ViError::UnsupportedTier {
+                requested: "full".to_owned(),
+                reason: "missing --audit-endpoint".to_owned(),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "unsupported_tier",
+                "exit_code": 8,
+                "message": "unsupported tier full: missing --audit-endpoint",
+                "detail": {
+                    "reason": "missing --audit-endpoint",
+                    "requested_tier": "full",
+                },
+                "remediation": "Use a supported tier or provide the missing inputs (e.g., `--audit-endpoint`).",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_corrupt_envelope() {
+        assert_envelope(
+            &ViError::CorruptEnvelope {
+                envelope: "VIRC",
+                offset: 7,
+                reason: "binding_crc32 mismatch",
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "corrupt_envelope",
+                "exit_code": 9,
+                "message": "corrupt VIRC envelope at offset 7: binding_crc32 mismatch",
+                "detail": {
+                    "envelope": "VIRC",
+                    "offset": 7,
+                    "reason": "binding_crc32 mismatch",
+                },
+                "remediation": "The artifact has been damaged. Re-fetch the original.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_hash_mismatch_envelope() {
+        assert_envelope(
+            &ViError::HashMismatch {
+                expected: "sha256:expected".to_owned(),
+                actual: "sha256:actual".to_owned(),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "hash_mismatch",
+                "exit_code": 4,
+                "message": "hash mismatch: expected sha256:expected, actual sha256:actual",
+                "detail": {
+                    "actual": "sha256:actual",
+                    "expected": "sha256:expected",
+                },
+                "remediation": "The checkpoint at the source has changed. Re-download or use `--allow-checkpoint-drift` if you are intentionally pinning.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_receipt_missing_envelope() {
+        assert_envelope(
+            &ViError::ReceiptMissing {
+                endpoint: "https://provider.example".to_owned(),
+                content_type: "application/json".to_owned(),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "receipt_missing",
+                "exit_code": 5,
+                "message": "receipt missing from https://provider.example response with content type application/json",
+                "detail": {
+                    "content_type": "application/json",
+                    "endpoint": "https://provider.example",
+                    "expected": "multipart/mixed",
+                },
+                "remediation": "The provider did not emit a receipt. Check that the endpoint supports `X-Verifiable-Receipt: 1` and that the prover is healthy.",
+                "trace_id": TRACE_ID,
+            }),
+        );
+    }
+
+    #[test]
+    fn serializes_internal_envelope() {
+        assert_envelope(
+            &ViError::Internal {
+                backtrace: "panic at boundary".to_owned(),
+            },
+            &json!({
+                "error": true,
+                "schema_version": 1,
+                "subcommand": SUBCOMMAND,
+                "category": "internal",
+                "exit_code": 70,
+                "message": "internal error",
+                "detail": {
+                    "backtrace": "panic at boundary",
+                },
+                "remediation": "Please file an issue with the trace_id.",
+                "trace_id": TRACE_ID,
+            }),
         );
     }
 }
