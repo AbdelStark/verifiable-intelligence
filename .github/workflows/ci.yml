@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust fmt and clippy
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          scripts/ci/lints.sh 2>&1 | tee reports/ci/lint.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-lint-${{ github.run_id }}
+          path: reports/ci/
+
+  stable-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Cargo test
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          cargo test --workspace --all-features --locked 2>&1 | tee reports/ci/cargo-test.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-stable-test-${{ github.run_id }}
+          path: reports/ci/
+
+  msrv-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-1.82.0
+      - name: Install MSRV
+        run: rustup toolchain install 1.82.0 --profile minimal
+      - name: Cargo build on MSRV
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          cargo +1.82.0 build --workspace --all-targets --locked 2>&1 | tee reports/ci/msrv-build.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-msrv-build-${{ github.run_id }}
+          path: reports/ci/
+
+  proof-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Proof bundle contracts
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          npm run test:bundle 2>&1 | tee reports/ci/proof-bundle.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-proof-bundle-${{ github.run_id }}
+          path: reports/ci/
+
+  browser-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Browser demo tests
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          npm run test:demo 2>&1 | tee reports/ci/browser-demo.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-browser-demo-${{ github.run_id }}
+          path: |
+            reports/ci/
+            test-results/
+            playwright-report/
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Cargo deny and forbidden edges
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          scripts/ci/deny.sh 2>&1 | tee reports/ci/supply-chain.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-supply-chain-${{ github.run_id }}
+          path: reports/ci/
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Secret scan
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          npm run test:secret-scan 2>&1 | tee reports/ci/secret-scan.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-secret-scan-${{ github.run_id }}
+          path: reports/ci/
