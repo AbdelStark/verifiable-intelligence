@@ -61,3 +61,10 @@ This document states the marketplace-demo threat model. CommitLLM owns the proto
 - Unsupported closed-weight model tests.
 - Browser smoke test that red paths cannot render as pass.
 - Secret scanning in CI with a reviewed false-positive allowlist.
+
+## Reporting
+
+The public reporting policy lives in [`../../SECURITY.md`](../../SECURITY.md). It
+defines the private reporting channel, response SLOs, coordinated disclosure
+policy, in-scope proof-integrity issues, and out-of-scope requests redirected to
+[`../../PRD.md#6-non-goals`](../../PRD.md#6-non-goals).

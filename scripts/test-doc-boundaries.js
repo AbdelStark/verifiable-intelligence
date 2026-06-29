@@ -24,6 +24,7 @@ function assertMatches(file, pattern, label = pattern.source) {
 const buyerGuide = 'docs/guides/buyer-proof-guide.md';
 const providerGuide = 'docs/guides/provider-integration-guide.md';
 const contributingGuide = 'CONTRIBUTING.md';
+const securityGuide = 'SECURITY.md';
 
 assertIncludes('README.md', './docs/guides/buyer-proof-guide.md', 'buyer guide link');
 assertIncludes('README.md', './docs/guides/provider-integration-guide.md', 'provider guide link');
@@ -58,5 +59,20 @@ for (const term of [
 
 assertMatches(contributingGuide, /browser marketplace demo|browser proof-market demo/i, 'browser-first contributor scope');
 assertMatches(contributingGuide, /unauthorized token resale/i, 'lawful-use contributor boundary');
+
+for (const term of [
+  'Reporting a Vulnerability',
+  'Response SLOs',
+  'Coordinated Disclosure',
+  'Out of Scope',
+  './PRD.md#6-non-goals',
+]) {
+  assertIncludes(securityGuide, term, `security policy ${term}`);
+}
+
+assertMatches(securityGuide, /3 business days/i, 'security acknowledgement SLO');
+assertMatches(securityGuide, /7 calendar days/i, 'security triage SLO');
+assertMatches(securityGuide, /unauthorized token resale/i, 'security lawful-use boundary');
+assertIncludes('docs/spec/06-security.md', '../../SECURITY.md', 'security policy link');
 
 console.log('Documentation boundary checks passed');
