@@ -10,7 +10,7 @@ pub fn run() -> i32 {
     // The leaf-crate calls keep the workspace link graph exercised at build
     // time before real subcommand logic lands; they are cheap no-ops.
     vi_client::placeholder();
-    vi_errors::placeholder();
+    let _ = vi_errors::USAGE_EXIT_CODE;
     vi_keygen::placeholder();
     vi_log::placeholder();
     vi_receipt::placeholder();
