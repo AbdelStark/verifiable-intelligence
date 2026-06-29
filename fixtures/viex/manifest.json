@@ -1,0 +1,44 @@
+{
+  "schema": "../../schemas/viex.schema.json",
+  "fixtures": [
+    {
+      "file": "happy-path.json",
+      "expected_overall": "pass"
+    },
+    {
+      "file": "model-swap.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "quote.model_id"
+    },
+    {
+      "file": "prompt-mismatch.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "request.prompt_hash"
+    },
+    {
+      "file": "answer-rewrite.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "response.answer_hash"
+    },
+    {
+      "file": "expired-quote.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "quote.expires_unix_ms"
+    },
+    {
+      "file": "wrong-key.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "verifier.key_hash"
+    },
+    {
+      "file": "missing-receipt.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "receipt.encoding"
+    },
+    {
+      "file": "receipt-tamper.json",
+      "expected_overall": "fail",
+      "expected_failing_field": "receipt.sha256"
+    }
+  ]
+}

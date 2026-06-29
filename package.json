@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "test:demo": "playwright test"
+    "test:demo": "playwright test",
+    "test:schema": "node scripts/validate-viex-fixtures.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.1"
+    "@playwright/test": "^1.49.1",
+    "ajv": "^8.17.1"
   }
 }

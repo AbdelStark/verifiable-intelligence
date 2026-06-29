@@ -1,0 +1,70 @@
+{
+  "magic": "VIEX",
+  "schema_version": 1,
+  "created_unix_ms": 1782734400000,
+  "quote": {
+    "quote_id": "qt_prompt_mismatch",
+    "provider_id": "lab-l4-01",
+    "model_id": "llama-3.1-8b-w8a8",
+    "checkpoint_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "commitllm_pin": "95c0ffee",
+    "key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "decode_policy_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "price": {
+      "currency": "USD",
+      "estimated": "0.0048",
+      "per_1k_tokens": "0.012"
+    },
+    "expires_unix_ms": 1782734700000,
+    "signature": "demo:qt_prompt_mismatch"
+  },
+  "request": {
+    "request_id": "req_prompt_mismatch",
+    "prompt_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "input_spec_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "max_tokens": 256
+  },
+  "response": {
+    "answer_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "generated_token_count": 31,
+    "output_spec_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "receipt": {
+    "encoding": "base64",
+    "content_type": "application/vnd.verifiable-intelligence.receipt+binary",
+    "bytes_b64": "VklSQwEAcHJvbXB0LW1pc21hdGNo",
+    "sha256": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+    "size_bytes": 22
+  },
+  "verifier": {
+    "key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "key_ref": "demo://keys/lab-l4-01",
+    "commitllm_pin": "95c0ffee",
+    "verifier_version": "demo-fixture-1",
+    "verification_mode": "browser-simulated"
+  },
+  "audit": {
+    "audit_endpoint": "demo://providers/lab-l4-01/v1/audit",
+    "tier": "routine",
+    "challenge": {
+      "token_index": 7,
+      "layer_indices": [3, 11, 19, 27]
+    },
+    "payload_hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "report": {
+    "overall": "fail",
+    "checked_at_unix_ms": 1782734400300,
+    "checks": [
+      {
+        "id": "prompt_binding",
+        "class": "exact",
+        "status": "fail",
+        "field": "request.prompt_hash",
+        "detail": "request prompt hash differs from the receipt prompt hash"
+      }
+    ],
+    "warnings": [],
+    "unsupported": []
+  }
+}

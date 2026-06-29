@@ -1,0 +1,69 @@
+{
+  "magic": "VIEX",
+  "schema_version": 1,
+  "created_unix_ms": 1782734400000,
+  "quote": {
+    "quote_id": "qt_missing_receipt",
+    "provider_id": "desk-a10g-cheap",
+    "model_id": "llama-3.1-8b-w8a8",
+    "checkpoint_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "commitllm_pin": "95c0ffee",
+    "key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "decode_policy_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "price": {
+      "currency": "USD",
+      "estimated": "0.0016",
+      "per_1k_tokens": "0.004"
+    },
+    "expires_unix_ms": 1782734700000,
+    "signature": "demo:qt_missing_receipt"
+  },
+  "request": {
+    "request_id": "req_missing_receipt",
+    "prompt_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "input_spec_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "max_tokens": 256
+  },
+  "response": {
+    "answer_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "generated_token_count": 31,
+    "output_spec_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "receipt": {
+    "encoding": "missing",
+    "content_type": "application/vnd.verifiable-intelligence.receipt+binary",
+    "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": 0
+  },
+  "verifier": {
+    "key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "key_ref": "demo://keys/lab-l4-01",
+    "commitllm_pin": "95c0ffee",
+    "verifier_version": "demo-fixture-1",
+    "verification_mode": "browser-simulated"
+  },
+  "audit": {
+    "audit_endpoint": "demo://providers/desk-a10g-cheap/v1/audit",
+    "tier": "routine",
+    "challenge": {
+      "token_index": 7,
+      "layer_indices": [3, 11, 19, 27]
+    },
+    "payload_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "report": {
+    "overall": "fail",
+    "checked_at_unix_ms": 1782734400300,
+    "checks": [
+      {
+        "id": "receipt_presence",
+        "class": "structural",
+        "status": "fail",
+        "field": "receipt.encoding",
+        "detail": "provider did not return a CommitLLM receipt"
+      }
+    ],
+    "warnings": [],
+    "unsupported": []
+  }
+}

@@ -21,6 +21,8 @@ The buyer-facing artifact is JSON:
 }
 ```
 
+The normative JSON Schema lives at [`schemas/viex.schema.json`](../../schemas/viex.schema.json). Canonical fixtures live under [`fixtures/viex/`](../../fixtures/viex/).
+
 ### 1.1 Quote
 
 | Field | Type | Notes |
@@ -60,7 +62,7 @@ Raw prompt text is optional and absent by default in shared bundles.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `encoding` | string | `base64` or `external_sha256` |
+| `encoding` | string | `base64`, `external_sha256`, or `missing` for a red-path bundle where the provider returned no receipt |
 | `content_type` | string | `application/vnd.verifiable-intelligence.receipt+binary` |
 | `bytes_b64` | string | Present when embedded |
 | `sha256` | string | Always present |
@@ -102,11 +104,12 @@ Each check result has:
   "id": "model_binding",
   "class": "exact",
   "status": "pass",
+  "field": "quote.key_hash",
   "detail": "quote key_hash matches receipt key_hash"
 }
 ```
 
-`class` values: `exact`, `algebraic`, `statistical`, `audited`, `open`, `structural`.
+`field` is optional for passing checks and required by convention for failed checks in canonical fixtures. It names the first bundle field that made the check fail. `class` values: `exact`, `algebraic`, `statistical`, `audited`, `open`, `structural`.
 
 ## 2. Binary envelopes
 
