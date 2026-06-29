@@ -8,10 +8,11 @@
 use std::{
     env, fs,
     fs::OpenOptions,
-    io,
+    io::{self, Write},
     path::{Component, Path, PathBuf},
 };
 
+use commitllm_core::serialize;
 use reqwest::{
     blocking::Client,
     header::{HeaderMap, HeaderValue, RANGE},
@@ -19,9 +20,16 @@ use reqwest::{
 };
 use sha2::{Digest, Sha256};
 use vi_errors::{NetworkErrorKind, ViError};
+use vi_receipt::{encode_viky_payload, Envelope, KeyBindingHeader, Magic};
 
 /// Default Hugging Face Hub endpoint used for checkpoint mirror downloads.
 pub const HUGGING_FACE_ENDPOINT: &str = "https://huggingface.co";
+
+/// Full upstream `CommitLLM` commit SHA used by key generation.
+pub const COMMITLLM_PIN: &str = "25541e83347655e44ad6e84eb901e1e7ae392a66";
+
+/// Buyer-facing short `CommitLLM` pin carried in demo proof bundles.
+pub const COMMITLLM_SHORT_PIN: &str = "25541e83";
 
 /// Canonical checkpoint hash result.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +51,110 @@ impl CheckpointHash {
         }
         hex
     }
+}
+
+/// Key generation request options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeygenOptions {
+    /// Public model identifier to bind into the verifier-key envelope.
+    pub model_id: String,
+    /// Local checkpoint directory containing `config.json`, safetensors, and tokenizer metadata.
+    pub checkpoint: PathBuf,
+    /// Destination for the emitted `VIKY` envelope.
+    pub output: PathBuf,
+    /// Deterministic key-generation seed bound into the `VIKY` header.
+    pub seed: u64,
+    /// Allow replacing existing output files.
+    pub force: bool,
+    /// Optional expected canonical checkpoint hash, formatted as `sha256:<hex>`.
+    pub expected_checkpoint_hash: Option<String>,
+    /// Convert an expected-checkpoint mismatch into a warning instead of an error.
+    pub allow_checkpoint_drift: bool,
+}
+
+impl KeygenOptions {
+    /// Build a key generation request with conservative defaults.
+    #[must_use]
+    pub fn new(
+        model_id: impl Into<String>,
+        checkpoint: impl AsRef<Path>,
+        output: impl AsRef<Path>,
+    ) -> Self {
+        Self {
+            model_id: model_id.into(),
+            checkpoint: checkpoint.as_ref().to_path_buf(),
+            output: output.as_ref().to_path_buf(),
+            seed: 0,
+            force: false,
+            expected_checkpoint_hash: None,
+            allow_checkpoint_drift: false,
+        }
+    }
+
+    /// Set the deterministic key-generation seed.
+    #[must_use]
+    pub const fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Allow replacing existing output files.
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Require the local checkpoint hash to match an expected hash.
+    #[must_use]
+    pub fn with_expected_checkpoint_hash(mut self, checkpoint_hash: impl Into<String>) -> Self {
+        self.expected_checkpoint_hash = Some(checkpoint_hash.into());
+        self
+    }
+
+    /// Allow local checkpoint drift relative to the expected hash.
+    #[must_use]
+    pub const fn with_allow_checkpoint_drift(mut self, allow_checkpoint_drift: bool) -> Self {
+        self.allow_checkpoint_drift = allow_checkpoint_drift;
+        self
+    }
+}
+
+/// Optional decode artifact emitted alongside a verifier key.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DecodeArtifactReport {
+    /// Path where the decode artifact was written.
+    pub output: PathBuf,
+    /// SHA-256 of the emitted decode artifact bytes.
+    pub artifact_hash: String,
+    /// Number of bytes written for the decode artifact.
+    pub artifact_size_bytes: usize,
+}
+
+/// Result summary for a generated verifier key.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct KeygenReport {
+    /// Public model identifier bound into the `VIKY` envelope.
+    pub model_id: String,
+    /// Canonical local checkpoint hash.
+    pub checkpoint_hash: String,
+    /// SHA-256 of the emitted verifier-key envelope.
+    pub key_hash: String,
+    /// Number of bytes written for the verifier-key envelope.
+    pub key_size_bytes: usize,
+    /// Destination where the verifier-key envelope was written.
+    pub output: PathBuf,
+    /// Deterministic key-generation seed bound into the `VIKY` header.
+    pub seed: u64,
+    /// Full pinned upstream `CommitLLM` commit SHA.
+    pub commitllm_revision: String,
+    /// Short upstream `CommitLLM` pin carried in buyer-facing bindings.
+    pub commitllm_pin: String,
+    /// Optional adjacent decode artifact emitted by upstream `CommitLLM`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode_artifact: Option<DecodeArtifactReport>,
+    /// Non-fatal warnings.
+    pub warnings: Vec<String>,
 }
 
 /// Hugging Face checkpoint mirror request.
@@ -180,7 +292,188 @@ pub fn canonical_checkpoint_hash(
     })
 }
 
+/// Generate a verifier key envelope from a local checkpoint directory.
+pub fn keygen(
+    model_id: impl Into<String>,
+    checkpoint: impl AsRef<Path>,
+    seed: u64,
+    output: impl AsRef<Path>,
+) -> Result<KeygenReport, ViError> {
+    let options = KeygenOptions::new(model_id, checkpoint, output).with_seed(seed);
+    keygen_with_options(&options)
+}
+
+/// Generate a verifier key envelope using explicit request options.
+pub fn keygen_with_options(options: &KeygenOptions) -> Result<KeygenReport, ViError> {
+    validate_keygen_options(options)?;
+    refuse_overwrite(&options.output, options.force)?;
+
+    let checkpoint_hash = canonical_checkpoint_hash(&options.checkpoint)?;
+    let checkpoint_hash = checkpoint_hash_string(&checkpoint_hash);
+    let mut warnings = Vec::new();
+    check_expected_checkpoint_hash(options, &checkpoint_hash, &mut warnings)?;
+
+    let upstream = commitllm_keygen::generate_key(&options.checkpoint, seed_bytes(options.seed))
+        .map_err(|error| {
+            input_error(
+                "checkpoint",
+                format!("CommitLLM key generation failed: {error}"),
+            )
+        })?;
+    let commitllm_key = serialize::serialize_key(&upstream.key);
+    let header = KeyBindingHeader::new(
+        &options.model_id,
+        &checkpoint_hash,
+        COMMITLLM_SHORT_PIN,
+        options.seed,
+    );
+    let payload = encode_viky_payload(&header, &commitllm_key)?;
+    let key_bytes = Envelope::new(Magic::VIKY, payload).encode()?;
+
+    let decode_artifact = upstream.decode_artifact.as_ref().map(|artifact| {
+        let bytes = serialize::serialize_decode_artifact(artifact);
+        let output = decode_artifact_path(&options.output);
+        (output, bytes)
+    });
+
+    if let Some((output, _)) = &decode_artifact {
+        refuse_overwrite(output, options.force)?;
+    }
+
+    write_output_file(&options.output, &key_bytes, options.force)?;
+    let decode_artifact = decode_artifact
+        .map(|(output, bytes)| {
+            write_output_file(&output, &bytes, options.force)?;
+            Ok::<_, ViError>(DecodeArtifactReport {
+                output,
+                artifact_hash: sha256_hex(&bytes),
+                artifact_size_bytes: bytes.len(),
+            })
+        })
+        .transpose()?;
+
+    Ok(KeygenReport {
+        model_id: options.model_id.clone(),
+        checkpoint_hash,
+        key_hash: sha256_hex(&key_bytes),
+        key_size_bytes: key_bytes.len(),
+        output: options.output.clone(),
+        seed: options.seed,
+        commitllm_revision: COMMITLLM_PIN.to_owned(),
+        commitllm_pin: COMMITLLM_SHORT_PIN.to_owned(),
+        decode_artifact,
+        warnings,
+    })
+}
+
 pub fn placeholder() {}
+
+fn validate_keygen_options(options: &KeygenOptions) -> Result<(), ViError> {
+    if options.model_id.trim().is_empty() {
+        return Err(input_error("model_id", "model_id must not be empty"));
+    }
+    if options.output.as_os_str().is_empty() {
+        return Err(input_error("output", "output path must not be empty"));
+    }
+    Ok(())
+}
+
+fn refuse_overwrite(path: &Path, force: bool) -> Result<(), ViError> {
+    if force || !path.exists() {
+        Ok(())
+    } else {
+        Err(input_error(
+            path.display().to_string(),
+            "output file exists; set force to overwrite",
+        ))
+    }
+}
+
+fn check_expected_checkpoint_hash(
+    options: &KeygenOptions,
+    actual: &str,
+    warnings: &mut Vec<String>,
+) -> Result<(), ViError> {
+    let Some(expected) = &options.expected_checkpoint_hash else {
+        return Ok(());
+    };
+    if expected == actual {
+        return Ok(());
+    }
+    if options.allow_checkpoint_drift {
+        warnings.push(format!(
+            "checkpoint_hash_mismatch_allowed: expected {expected}, actual {actual}"
+        ));
+        Ok(())
+    } else {
+        Err(ViError::HashMismatch {
+            expected: expected.clone(),
+            actual: actual.to_owned(),
+        })
+    }
+}
+
+fn checkpoint_hash_string(hash: &CheckpointHash) -> String {
+    format!("sha256:{}", hash.hash_hex())
+}
+
+fn seed_bytes(seed: u64) -> [u8; 32] {
+    let mut bytes = [0_u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    bytes
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity("sha256:".len() + digest.len() * 2);
+    output.push_str("sha256:");
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
+fn decode_artifact_path(output: &Path) -> PathBuf {
+    let mut path = output.as_os_str().to_os_string();
+    path.push(".decode");
+    PathBuf::from(path)
+}
+
+fn write_output_file(path: &Path, bytes: &[u8], force: bool) -> Result<(), ViError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|error| {
+            input_error(
+                parent.display().to_string(),
+                format!("failed to create output directory: {error}"),
+            )
+        })?;
+    }
+
+    let mut options = OpenOptions::new();
+    options.write(true);
+    if force {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+
+    let mut file = options.open(path).map_err(|error| {
+        input_error(
+            path.display().to_string(),
+            format!("failed to open output file: {error}"),
+        )
+    })?;
+    file.write_all(bytes).map_err(|error| {
+        input_error(
+            path.display().to_string(),
+            format!("failed to write output file: {error}"),
+        )
+    })
+}
 
 fn validate_mirror(mirror: &HfCheckpointMirror) -> Result<(), ViError> {
     if mirror.endpoint.trim().is_empty() {
@@ -511,10 +804,11 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tempfile::TempDir;
     use vi_errors::{NetworkErrorKind, ViError};
+    use vi_receipt::{decode_viky_payload, Envelope, Magic};
 
     use super::{
-        canonical_checkpoint_hash, checkpoint_cache_dir, download_hf_checkpoint_to,
-        HfCheckpointMirror,
+        canonical_checkpoint_hash, checkpoint_cache_dir, download_hf_checkpoint_to, keygen,
+        keygen_with_options, HfCheckpointMirror, KeygenOptions, COMMITLLM_PIN, COMMITLLM_SHORT_PIN,
     };
 
     #[test]
@@ -628,6 +922,79 @@ mod tests {
                 detail: None,
             }
         );
+    }
+
+    #[test]
+    fn keygen_emits_decodable_viky_envelope_and_report_hash() {
+        let checkpoint = synthetic_commitllm_checkpoint();
+        let output_dir = tempfile::tempdir().expect("output tempdir");
+        let output = output_dir.path().join("toy.viky");
+
+        let report = keygen("toy-model", checkpoint.path(), 7, &output)
+            .expect("keygen should produce a VIKY envelope");
+
+        let bytes = fs::read(&output).expect("key envelope should exist");
+        let envelope = Envelope::decode(&bytes).expect("envelope should decode");
+        assert_eq!(envelope.magic, Magic::VIKY);
+
+        let (header, commitllm_key) =
+            decode_viky_payload(&envelope.payload).expect("VIKY payload should decode");
+        commitllm_core::serialize::deserialize_key(commitllm_key)
+            .expect("wrapped CommitLLM key should deserialize");
+
+        assert_eq!(header.model_id, "toy-model");
+        assert_eq!(header.seed, 7);
+        assert_eq!(header.checkpoint_hash, report.checkpoint_hash);
+        assert_eq!(header.commitllm_pin, COMMITLLM_SHORT_PIN);
+        assert_eq!(report.model_id, "toy-model");
+        assert_eq!(report.output, output);
+        assert_eq!(report.seed, 7);
+        assert_eq!(report.commitllm_revision, COMMITLLM_PIN);
+        assert_eq!(report.commitllm_pin, COMMITLLM_SHORT_PIN);
+        assert_eq!(report.key_size_bytes, bytes.len());
+        assert_eq!(report.key_hash, sha256_prefixed(&bytes));
+        assert!(report.decode_artifact.is_none());
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn keygen_refuses_existing_output_without_force() {
+        let output_dir = tempfile::tempdir().expect("output tempdir");
+        let output = output_dir.path().join("toy.viky");
+        fs::write(&output, "existing").expect("existing output");
+
+        let error = keygen("toy-model", output_dir.path(), 7, &output)
+            .expect_err("existing output should fail before checkpoint work");
+
+        assert_eq!(
+            error,
+            ViError::Input {
+                arg: output.display().to_string(),
+                reason: "output file exists; set force to overwrite".to_owned(),
+                detail: None,
+            }
+        );
+    }
+
+    #[test]
+    fn expected_checkpoint_hash_mismatch_returns_hash_mismatch() {
+        let checkpoint = synthetic_commitllm_checkpoint();
+        let output_dir = tempfile::tempdir().expect("output tempdir");
+        let output = output_dir.path().join("toy.viky");
+        let options = KeygenOptions::new("toy-model", checkpoint.path(), &output)
+            .with_expected_checkpoint_hash("sha256:0000");
+
+        let error =
+            keygen_with_options(&options).expect_err("unexpected checkpoint hash should fail");
+
+        assert!(matches!(
+            error,
+            ViError::HashMismatch {
+                expected,
+                actual
+            } if expected == "sha256:0000" && actual.starts_with("sha256:")
+        ));
+        assert!(!output.exists());
     }
 
     #[test]
@@ -762,12 +1129,134 @@ mod tests {
         fs::write(root.join(name), contents).expect("fixture file should be written");
     }
 
+    fn synthetic_commitllm_checkpoint() -> TempDir {
+        let checkpoint = tempfile::tempdir().expect("tempdir should be created");
+        fs::write(
+            checkpoint.path().join("config.json"),
+            r#"{"model_type":"toy","rms_norm_eps":0.00001,"rope_theta":10000.0,"torch_dtype":"float32"}"#,
+        )
+        .expect("config should be written");
+        fs::write(checkpoint.path().join("tokenizer.json"), "{}")
+            .expect("tokenizer should be written");
+
+        let q = i8_values(16, 1);
+        let k = i8_values(16, 2);
+        let v = i8_values(16, 3);
+        let o = i8_values(16, 4);
+        let gate = i8_values(32, 5);
+        let up = i8_values(32, 6);
+        let down = i8_values(32, 7);
+        let lm_head = i8_values(24, 8);
+        let embedding = f32_values(24, 0.01);
+        let input_norm = vec![1.0_f32; 4];
+        let post_norm = vec![1.0_f32; 4];
+        let final_norm = vec![1.0_f32; 4];
+
+        commitllm_keygen::write_safetensors_mixed(
+            &checkpoint.path().join("model.safetensors"),
+            &[
+                (
+                    "model.layers.0.self_attn.q_proj.weight",
+                    vec![4, 4],
+                    commitllm_keygen::TypedTensor::I8(&q),
+                ),
+                (
+                    "model.layers.0.self_attn.k_proj.weight",
+                    vec![4, 4],
+                    commitllm_keygen::TypedTensor::I8(&k),
+                ),
+                (
+                    "model.layers.0.self_attn.v_proj.weight",
+                    vec![4, 4],
+                    commitllm_keygen::TypedTensor::I8(&v),
+                ),
+                (
+                    "model.layers.0.self_attn.o_proj.weight",
+                    vec![4, 4],
+                    commitllm_keygen::TypedTensor::I8(&o),
+                ),
+                (
+                    "model.layers.0.mlp.gate_proj.weight",
+                    vec![8, 4],
+                    commitllm_keygen::TypedTensor::I8(&gate),
+                ),
+                (
+                    "model.layers.0.mlp.up_proj.weight",
+                    vec![8, 4],
+                    commitllm_keygen::TypedTensor::I8(&up),
+                ),
+                (
+                    "model.layers.0.mlp.down_proj.weight",
+                    vec![4, 8],
+                    commitllm_keygen::TypedTensor::I8(&down),
+                ),
+                (
+                    "lm_head.weight",
+                    vec![6, 4],
+                    commitllm_keygen::TypedTensor::I8(&lm_head),
+                ),
+                (
+                    "model.embed_tokens.weight",
+                    vec![6, 4],
+                    commitllm_keygen::TypedTensor::F32(&embedding),
+                ),
+                (
+                    "model.layers.0.input_layernorm.weight",
+                    vec![4],
+                    commitllm_keygen::TypedTensor::F32(&input_norm),
+                ),
+                (
+                    "model.layers.0.post_attention_layernorm.weight",
+                    vec![4],
+                    commitllm_keygen::TypedTensor::F32(&post_norm),
+                ),
+                (
+                    "model.norm.weight",
+                    vec![4],
+                    commitllm_keygen::TypedTensor::F32(&final_norm),
+                ),
+            ],
+        )
+        .expect("safetensors should be written");
+
+        checkpoint
+    }
+
+    fn i8_values(len: usize, offset: usize) -> Vec<i8> {
+        const VALUES: [i8; 17] = [-8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+        (0..len)
+            .map(|index| VALUES[(index + offset) % VALUES.len()])
+            .collect()
+    }
+
+    fn f32_values(len: usize, step: f32) -> Vec<f32> {
+        let mut value = 1.0;
+        (0..len)
+            .map(|_| {
+                let current = value;
+                value += step;
+                current
+            })
+            .collect()
+    }
+
     fn sha256<const N: usize>(chunks: [&str; N]) -> [u8; 32] {
         let mut hasher = Sha256::new();
         for chunk in chunks {
             hasher.update(chunk.as_bytes());
         }
         hasher.finalize().into()
+    }
+
+    fn sha256_prefixed(bytes: &[u8]) -> String {
+        let digest = Sha256::digest(bytes);
+        let mut output = String::with_capacity("sha256:".len() + digest.len() * 2);
+        output.push_str("sha256:");
+        for byte in digest {
+            use std::fmt::Write as _;
+            let _ = write!(&mut output, "{byte:02x}");
+        }
+        output
     }
 
     fn test_mirror(endpoint: String) -> HfCheckpointMirror {

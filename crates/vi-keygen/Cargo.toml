@@ -10,7 +10,10 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+commitllm-core = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-core" }
+commitllm-keygen = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-keygen" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 vi-errors = { path = "../vi-errors" }
 vi-receipt = { path = "../vi-receipt" }

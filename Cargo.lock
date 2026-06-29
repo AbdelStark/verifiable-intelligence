@@ -62,6 +62,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.103"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
+
+[[package]]
 name = "assert-json-diff"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -498,6 +504,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "http"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -715,6 +727,15 @@ name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
+
+[[package]]
+name = "memmap2"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "mio"
@@ -1217,6 +1238,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safetensors"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44560c11236a6130a46ce36c836a62936dc81ebf8c36a37947423571be0e55b6"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1614,6 +1645,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "verilm-keygen"
+version = "0.1.0"
+source = "git+https://github.com/lambdaclass/CommitLLM.git?rev=25541e83347655e44ad6e84eb901e1e7ae392a66#25541e83347655e44ad6e84eb901e1e7ae392a66"
+dependencies = [
+ "anyhow",
+ "clap",
+ "getrandom 0.2.17",
+ "hex",
+ "memmap2",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "safetensors",
+ "serde_json",
+ "sha2",
+ "verilm-core",
+]
+
+[[package]]
 name = "verilm-verify"
 version = "0.1.0"
 source = "git+https://github.com/lambdaclass/CommitLLM.git?rev=25541e83347655e44ad6e84eb901e1e7ae392a66#25541e83347655e44ad6e84eb901e1e7ae392a66"
@@ -1672,8 +1721,11 @@ name = "vi-keygen"
 version = "0.0.0"
 dependencies = [
  "reqwest",
+ "serde",
  "sha2",
  "tempfile",
+ "verilm-core",
+ "verilm-keygen",
  "vi-errors",
  "vi-receipt",
 ]
