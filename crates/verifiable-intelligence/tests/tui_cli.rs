@@ -14,6 +14,10 @@ fn stderr_json(output: &std::process::Output) -> Value {
     serde_json::from_slice(&output.stderr).expect("stderr should be a JSON error envelope")
 }
 
+fn stderr_utf8(output: &std::process::Output) -> String {
+    String::from_utf8(output.stderr.clone()).expect("stderr should be UTF-8")
+}
+
 fn stdout_utf8(output: &std::process::Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout should be UTF-8")
 }
@@ -43,6 +47,31 @@ fn tui_dispatches_to_tui_runtime_with_public_flags() {
     assert_eq!(value["endpoint"], "https://provider.example");
     assert_eq!(value["tamper"], "byte-flip");
     assert_eq!(value["phase_delay_ms"], 250);
+}
+
+#[cfg(feature = "tui")]
+#[test]
+fn tui_log_info_writes_logs_to_stderr_without_polluting_stdout() {
+    let output = vi_command()
+        .args(["--log", "info", "tui"])
+        .output()
+        .expect("vi should run");
+
+    assert_eq!(output.status.code(), Some(0));
+    let value = stdout_json(&output);
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["subcommand"], "tui");
+
+    let stderr = stderr_utf8(&output);
+    let events: Vec<Value> = stderr
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("log line should be JSON"))
+        .collect();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event"], "process.start");
+    assert_eq!(events[1]["event"], "process.end");
+    assert!(events.iter().all(|event| event["trace_id"].is_string()));
+    assert!(events.iter().all(|event| event["span"] == "cli.tui"));
 }
 
 #[cfg(feature = "tui")]

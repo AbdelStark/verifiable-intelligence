@@ -15,6 +15,7 @@ use std::{
     path::{Path, PathBuf},
     process,
     sync::Once,
+    time::Instant,
 };
 
 use clap::{error::ErrorKind, Args, Parser, Subcommand};
@@ -319,25 +320,18 @@ pub fn process_main() -> i32 {
 pub fn process_main_from<I, T>(args: I) -> i32
 where
     I: IntoIterator<Item = T>,
-    T: Into<OsString> + Clone,
+    T: Into<OsString>,
 {
     install_panic_hook();
     install_sigint_handler();
     let trace_id = trace_id();
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let log_args = log_args(&args);
 
     match Cli::try_parse_from(args) {
         Ok(cli) => {
             let config = ResolvedConfig::from_env(&cli);
-            match init_logging(&cli, &trace_id).and_then(|()| run_cli(cli, &config)) {
-                Ok(output) => {
-                    print_output(output);
-                    0
-                }
-                Err(error) => {
-                    print_error_envelope(&error, &trace_id);
-                    error.exit_code()
-                }
-            }
+            run_parsed_cli(cli, &config, &trace_id, &log_args)
         }
         Err(error) => {
             let exit_code = match error.kind() {
@@ -350,6 +344,40 @@ where
             exit_code
         }
     }
+}
+
+fn run_parsed_cli(cli: Cli, config: &ResolvedConfig, trace_id: &str, log_args: &[String]) -> i32 {
+    let subcommand = cli_subcommand_name(&cli);
+    let started_at = Instant::now();
+    if let Err(error) = init_logging(&cli, trace_id) {
+        print_error_envelope(&error, trace_id);
+        return error.exit_code();
+    }
+
+    let span = vi_log::cli_span(subcommand);
+    let _guard = span.enter();
+    vi_log::emit_process_start(log_args);
+
+    match run_cli(cli, config) {
+        Ok(output) => {
+            vi_log::emit_process_end(0, elapsed_millis(started_at));
+            print_output(output);
+            0
+        }
+        Err(error) => {
+            let exit_code = error.exit_code();
+            vi_log::emit_process_error(error.category(), exit_code);
+            vi_log::emit_process_end(exit_code, elapsed_millis(started_at));
+            print_error_envelope(&error, trace_id);
+            exit_code
+        }
+    }
+}
+
+fn log_args(args: &[OsString]) -> Vec<String> {
+    args.iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn run_cli(cli: Cli, config: &ResolvedConfig) -> Result<Output, ViError> {
@@ -510,10 +538,32 @@ fn run_verify(args: &VerifyArgs, config: &ResolvedConfig) -> Result<Output, ViEr
     let receipt_bytes = read_input_file(&args.receipt, "--receipt")?;
     let key_bytes = read_input_file(&args.key, "--key")?;
     let mut audit_provider = build_verify_audit_provider(tier, config, &receipt_bytes)?;
-    let report = vi_verifier::verify(&receipt_bytes, &key_bytes, tier, &mut audit_provider)?;
+    let report = vi_verifier::verify_with_callback(
+        &receipt_bytes,
+        &key_bytes,
+        tier,
+        &mut audit_provider,
+        emit_verify_phase_event,
+    )?;
     let output = VerifyOutput::from_report(&report);
 
     json_output(&output, config, "verify")
+}
+
+fn emit_verify_phase_event(event: vi_verifier::PhaseEvent) {
+    match event {
+        vi_verifier::PhaseEvent::Started { phase } => {
+            vi_log::emit_verify_phase_start(phase.as_str());
+        }
+        vi_verifier::PhaseEvent::Ended {
+            phase,
+            passed,
+            detail,
+            elapsed_ms,
+        } => {
+            vi_log::emit_verify_phase_end(phase.as_str(), passed, elapsed_ms, detail.as_deref());
+        }
+    }
 }
 
 fn parse_audit_tier(value: &str) -> Result<AuditTier, ViError> {
@@ -925,6 +975,10 @@ fn trace_id() -> String {
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(vi_log::generate_trace_id)
+}
+
+fn elapsed_millis(started_at: Instant) -> u64 {
+    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 fn ensure_test_hooks_enabled() -> Result<(), ViError> {
