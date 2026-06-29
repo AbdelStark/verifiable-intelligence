@@ -37,6 +37,8 @@ The normative field list is in [03-data-model.md](./03-data-model.md).
 
 The static demo may simulate these endpoints. A live broker must use the same shapes.
 
+The broker is an ordering and convenience layer, not a trust root. It must not accept buyer-supplied third-party API keys, credential fields, or credential headers. Quote signatures are useful for replay and UI integrity, but proof validity comes from verifier checks over the bundle fields and CommitLLM receipt bindings.
+
 ### `GET /providers`
 
 Returns authorized demo providers:
@@ -84,11 +86,19 @@ Response:
   "checkpoint_hash": "sha256:...",
   "key_hash": "sha256:...",
   "commitllm_pin": "25541e83",
+  "decode_policy": {
+    "temperature": 0.2,
+    "top_p": 0.95,
+    "max_tokens": 256
+  },
+  "decode_policy_hash": "sha256:...",
   "expires_unix_ms": 1782735000000,
   "estimated_price_usd": "0.0048",
   "signature": "demo:..."
 }
 ```
+
+Requests containing fields or headers such as `api_key`, `x-api-key`, `access_token`, `authorization`, `credentials`, `password`, or `secret` must be rejected before a quote is created.
 
 ### `POST /chat`
 
@@ -112,9 +122,29 @@ Response:
 }
 ```
 
+The initial proof bundle may carry `report.overall = "not_run"` when the browser verifier is unavailable. The bundle still must include quote, request, response, receipt, verifier, audit, and report sections that validate against the VIEX schema.
+
 ### `POST /verify`
 
 Prototype fallback only. A production browser-first flow should verify locally when feasible.
+
+Request:
+
+```json
+{
+  "proof_bundle": {}
+}
+```
+
+Response:
+
+```json
+{
+  "report": {}
+}
+```
+
+The fallback verifier must fail closed on model, checkpoint, CommitLLM pin, verifier key, decode policy, prompt hash, answer hash, receipt hash, and quote-expiry mismatches. A broker quote signature alone is not sufficient evidence.
 
 ## 4. Provider API
 
