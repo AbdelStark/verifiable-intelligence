@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verifiable-intelligence.local/schemas/verify-report.schema.json",
+  "title": "vi verify report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subcommand",
+    "tier",
+    "verdict",
+    "phases",
+    "checks_run",
+    "checks_passed",
+    "warnings",
+    "elapsed_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of the CLI JSON output contract.",
+      "const": 1
+    },
+    "subcommand": {
+      "description": "CLI subcommand that produced this report.",
+      "const": "verify"
+    },
+    "tier": {
+      "description": "Verification tier requested by the caller.",
+      "type": "string",
+      "enum": ["receipt-only", "routine", "deep", "full"]
+    },
+    "verdict": {
+      "description": "Overall verification verdict.",
+      "type": "string",
+      "enum": ["pass", "fail"]
+    },
+    "phases": {
+      "description": "Stable project-level phases represented by this verifier.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/phase"
+      }
+    },
+    "checks_run": {
+      "description": "Number of verifier checks executed.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "checks_passed": {
+      "description": "Number of verifier checks that passed.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "description": "Non-fatal warnings emitted during verification.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "elapsed_ms": {
+      "description": "Elapsed verifier runtime in milliseconds.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "phase_details": {
+      "description": "Optional per-phase detail records, discriminated by `phase`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/phase_detail"
+      }
+    }
+  },
+  "$defs": {
+    "phase": {
+      "type": "string",
+      "enum": [
+        "embedding_merkle",
+        "shell_freivalds",
+        "bridge_replay",
+        "attention_corridor",
+        "kv_provenance",
+        "lm_head",
+        "decode_policy"
+      ]
+    },
+    "phase_detail_common": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "status"],
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "status": {
+          "description": "Per-phase verification status.",
+          "type": "string",
+          "enum": ["pass", "fail", "skipped"]
+        },
+        "elapsed_ms": {
+          "description": "Elapsed runtime for this phase in milliseconds.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "detail": {
+          "description": "Phase-specific verifier detail for UI or debugging.",
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "phase_detail": {
+      "oneOf": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "embedding_merkle" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "shell_freivalds" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "bridge_replay" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "attention_corridor" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "kv_provenance" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "lm_head" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/phase_detail_common" },
+            { "type": "object", "properties": { "phase": { "const": "decode_policy" } } }
+          ]
+        }
+      ]
+    }
+  }
+}
