@@ -38,6 +38,7 @@ const ciGuide = 'docs/ci/README.md';
 const redBuildGuide = 'docs/ci/red-build.md';
 const gpuRunnerGuide = 'docs/ci/gpu-runners.md';
 const codeOfConduct = 'CODE_OF_CONDUCT.md';
+const yankGuide = 'docs/release/yank.md';
 
 assertIncludes('README.md', './docs/guides/buyer-proof-guide.md', 'buyer guide link');
 assertIncludes('README.md', './docs/guides/provider-integration-guide.md', 'provider guide link');
@@ -140,5 +141,16 @@ for (const term of [
 }
 
 assertIncludes(contributingGuide, './CODE_OF_CONDUCT.md', 'code of conduct link');
+
+for (const term of [
+  'Release Yank Procedure',
+  'cargo yank',
+  'yanked-${VERSION}-${YANK_REASON}',
+  'gh release edit',
+  'Patch Release',
+  'CHANGELOG.md',
+]) {
+  assertIncludes(yankGuide, term, `yank guide ${term}`);
+}
 
 console.log('Documentation boundary checks passed');
