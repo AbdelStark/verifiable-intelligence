@@ -202,6 +202,8 @@ JSON output, then continue with the requested operation.
 The old `vi` CLI remains an implementation utility:
 
 - `vi keygen --model <MODEL> --checkpoint <DIR> --output <PATH> [--seed <U64>] [--force] [--expected-checkpoint-hash <SHA256>] [--allow-checkpoint-drift]`
+- `vi chat --endpoint <URL> --prompt <TEXT> [--max-tokens <U32>] --receipt-out <PATH>`
+- `vi chat --endpoint <URL> --prompt <TEXT> [--max-tokens <U32>] --no-receipt`
 - `vi verify`
 - `vi receipt inspect`
 - `vi bundle inspect` (new)

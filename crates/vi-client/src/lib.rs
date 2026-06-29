@@ -67,11 +67,29 @@ impl ChatClient {
         trace_id: &str,
         json_body: impl Into<String>,
     ) -> Result<ChatResponse, ViError> {
+        self.post_chat_completions_inner(trace_id, json_body, true)
+    }
+
+    /// POST an OpenAI-compatible chat-completions JSON body without receipt opt-in.
+    pub fn post_chat_completions_without_receipt(
+        &self,
+        trace_id: &str,
+        json_body: impl Into<String>,
+    ) -> Result<ChatResponse, ViError> {
+        self.post_chat_completions_inner(trace_id, json_body, false)
+    }
+
+    fn post_chat_completions_inner(
+        &self,
+        trace_id: &str,
+        json_body: impl Into<String>,
+        receipt_opt_in: bool,
+    ) -> Result<ChatResponse, ViError> {
         let url = self.chat_url()?;
         let response = self
             .client
             .post(url.clone())
-            .headers(self.chat_headers(trace_id)?)
+            .headers(self.chat_headers_with_receipt(trace_id, receipt_opt_in)?)
             .body(json_body.into())
             .send()
             .map_err(|error| network_error(url.as_str(), &error))?;
@@ -194,10 +212,16 @@ impl ChatClient {
             .map_err(|error| input_error("endpoint", format!("invalid healthz path: {error}")))
     }
 
-    fn chat_headers(&self, trace_id: &str) -> Result<HeaderMap, ViError> {
+    fn chat_headers_with_receipt(
+        &self,
+        trace_id: &str,
+        receipt_opt_in: bool,
+    ) -> Result<HeaderMap, ViError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(RECEIPT_HEADER, HeaderValue::from_static("1"));
+        if receipt_opt_in {
+            headers.insert(RECEIPT_HEADER, HeaderValue::from_static("1"));
+        }
         headers.insert(
             TRACE_HEADER,
             HeaderValue::from_str(trace_id).map_err(|error| {
@@ -374,6 +398,11 @@ pub fn parse_chat_response(response: &ChatResponse) -> Result<ParsedChatResponse
             content_type: content_type.to_owned(),
         })
     }
+}
+
+/// Parse a plain OpenAI-compatible chat response where no receipt was requested.
+pub fn parse_openai_chat_response(response: &ChatResponse) -> Result<String, ViError> {
+    chat_text_from_json(&response.body)
 }
 
 pub fn placeholder() {}
@@ -674,8 +703,8 @@ mod tests {
     use vi_receipt::{AuditChallenge, AuditTier};
 
     use super::{
-        parse_chat_response, AuditRequest, ChatClient, ChatResponse, API_KEY_ENV, RECEIPT_HEADER,
-        TRACE_HEADER,
+        parse_chat_response, parse_openai_chat_response, AuditRequest, ChatClient, ChatResponse,
+        API_KEY_ENV, RECEIPT_HEADER, TRACE_HEADER,
     };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -702,7 +731,9 @@ mod tests {
         env::set_var(API_KEY_ENV, "secret-token");
 
         let client = ChatClient::from_env("https://provider.example").expect("client builds");
-        let headers = client.chat_headers("trace-123").expect("headers build");
+        let headers = client
+            .chat_headers_with_receipt("trace-123", true)
+            .expect("headers build");
 
         restore_env(previous);
         assert_eq!(headers.get(RECEIPT_HEADER).expect("receipt header"), "1");
@@ -767,7 +798,9 @@ mod tests {
             .post_chat_completions("trace-chat", r#"{"messages":[]}"#)
             .expect("chat request should succeed");
         let parsed = parse_chat_response(&response).expect("multipart response parses");
-        let headers = client.chat_headers("trace-chat").expect("headers build");
+        let headers = client
+            .chat_headers_with_receipt("trace-chat", true)
+            .expect("headers build");
 
         mock.assert();
         assert_eq!(parsed.text, "hello mock");
@@ -776,6 +809,40 @@ mod tests {
             Some(b"VIRC-mock-receipt".as_slice())
         );
         assert!(!format!("{headers:?}").contains("secret-token"));
+    }
+
+    #[test]
+    fn mockito_no_receipt_chat_omits_receipt_header_and_parses_plain_json() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("content-type", "application/json")
+            .match_header("x-verifiable-receipt", Matcher::Missing)
+            .match_header("x-verifiable-intelligence-trace", "trace-chat")
+            .match_body(Matcher::Json(serde_json::json!({
+                "messages": [{"role": "user", "content": "hello"}],
+                "max_tokens": 32,
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(br#"{"choices":[{"message":{"content":"plain mock"}}]}"#)
+            .create();
+        let client = http_test_client(&server.url(), None);
+
+        let response = client
+            .post_chat_completions_without_receipt(
+                "trace-chat",
+                serde_json::json!({
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "max_tokens": 32,
+                })
+                .to_string(),
+            )
+            .expect("chat request should succeed");
+        let text = parse_openai_chat_response(&response).expect("plain JSON should parse");
+
+        mock.assert();
+        assert_eq!(text, "plain mock");
     }
 
     #[test]
