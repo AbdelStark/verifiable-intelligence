@@ -958,6 +958,33 @@ mod tests {
     }
 
     #[test]
+    fn keygen_same_inputs_are_byte_identical_and_seed_changes_bytes() {
+        let checkpoint = synthetic_commitllm_checkpoint();
+        let output_dir = tempfile::tempdir().expect("output tempdir");
+        let first = output_dir.path().join("first.viky");
+        let second = output_dir.path().join("second.viky");
+        let different_seed = output_dir.path().join("different-seed.viky");
+
+        let first_report =
+            keygen("toy-model", checkpoint.path(), 7, &first).expect("first keygen should succeed");
+        let second_report = keygen("toy-model", checkpoint.path(), 7, &second)
+            .expect("second keygen should succeed");
+        let different_seed_report = keygen("toy-model", checkpoint.path(), 8, &different_seed)
+            .expect("different-seed keygen should succeed");
+
+        let first_bytes = fs::read(&first).expect("first key should exist");
+        let second_bytes = fs::read(&second).expect("second key should exist");
+        let different_seed_bytes =
+            fs::read(&different_seed).expect("different-seed key should exist");
+
+        assert_eq!(first_bytes, second_bytes);
+        assert_eq!(first_report.key_hash, second_report.key_hash);
+        assert_eq!(first_report.key_hash, sha256_prefixed(&first_bytes));
+        assert_ne!(first_bytes, different_seed_bytes);
+        assert_ne!(first_report.key_hash, different_seed_report.key_hash);
+    }
+
+    #[test]
     fn keygen_refuses_existing_output_without_force() {
         let output_dir = tempfile::tempdir().expect("output tempdir");
         let output = output_dir.path().join("toy.viky");
