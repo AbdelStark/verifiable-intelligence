@@ -35,6 +35,29 @@ function withTimeout(promise, label, ms = 10000) {
   return Promise.race([promise, timer]).finally(() => clearTimeout(timeout));
 }
 
+async function providerPost(port, pathname, body, headers = {}) {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...headers
+    },
+    body: typeof body === 'string' ? body : JSON.stringify(body)
+  });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = text;
+  }
+  return {
+    status: response.status,
+    contentType: response.headers.get('content-type'),
+    body: payload
+  };
+}
+
 function spawnEntrypoint(env) {
   const child = spawn(entrypoint, {
     cwd: root,
@@ -145,6 +168,20 @@ async function sigtermShutsDownCleanly() {
   assert.equal(health.key_hash, zeroes('4'));
   assert.equal(health.commitllm_pin, commitllmShort);
 
+  const chat = await providerPost(port, '/v1/chat/completions', {
+    messages: [{ role: 'user', content: 'hello' }],
+    max_tokens: 4096
+  });
+  assert.equal(chat.status, 200);
+  assert.equal(chat.body.verifiable_intelligence.max_tokens_requested, 4096);
+  assert.equal(chat.body.verifiable_intelligence.max_tokens_effective, 1024);
+  assert.equal(chat.body.verifiable_intelligence.max_tokens_clamped, true);
+
+  const oversize = await providerPost(port, '/v1/chat/completions', JSON.stringify({ prompt: 'x'.repeat(33000) }));
+  assert.equal(oversize.status, 413);
+  assert.equal(oversize.body.error, true);
+  assert.equal(oversize.body.detail.limit_bytes, 32768);
+
   run.child.kill('SIGTERM');
   const result = await run.exit;
   assert.deepEqual(result, { code: 0, signal: null }, run.stderr());
@@ -154,9 +191,63 @@ async function sigtermShutsDownCleanly() {
   assert.equal(shutdown.exit_code, 0);
 }
 
+async function rateLimitsApplyPerIp() {
+  const port = await freePort();
+  const bind = `127.0.0.1:${port}`;
+  const run = spawnEntrypoint({
+    VI_BIND_ADDR: bind,
+    VI_HEALTHZ_BIND_ADDR: bind,
+    VI_PROVIDER_STUB: '1',
+    VI_RATE_LIMIT_RPM: '60',
+    VI_AUDIT_RATE_LIMIT_RPM: '60',
+    VI_RATE_LIMIT_WINDOW_S: '1'
+  });
+
+  await run.ready;
+  const firstChat = await providerPost(
+    port,
+    '/v1/chat/completions',
+    { messages: [], max_tokens: 8 },
+    { 'x-forwarded-for': '203.0.113.7' }
+  );
+  const limitedChat = await providerPost(
+    port,
+    '/v1/chat/completions',
+    { messages: [], max_tokens: 8 },
+    { 'x-forwarded-for': '203.0.113.7' }
+  );
+  const otherIpChat = await providerPost(
+    port,
+    '/v1/chat/completions',
+    { messages: [], max_tokens: 8 },
+    { 'x-forwarded-for': '203.0.113.8' }
+  );
+  assert.equal(firstChat.status, 200);
+  assert.equal(limitedChat.status, 429);
+  assert.equal(limitedChat.body.category, 'rate_limit');
+  assert.equal(otherIpChat.status, 200);
+
+  const auditBody = {
+    receipt_hash: zeroes('5'),
+    tier: 'routine',
+    challenge: { token_index: 7, layer_indices: [0, 2, 4] }
+  };
+  const firstAudit = await providerPost(port, '/v1/audit', auditBody, { 'x-forwarded-for': '203.0.113.9' });
+  const limitedAudit = await providerPost(port, '/v1/audit', auditBody, { 'x-forwarded-for': '203.0.113.9' });
+  assert.equal(firstAudit.status, 200);
+  assert.equal(firstAudit.contentType, 'application/vnd.verifiable-intelligence.audit+binary');
+  assert.equal(limitedAudit.status, 429);
+  assert.equal(limitedAudit.body.category, 'rate_limit');
+
+  run.child.kill('SIGTERM');
+  const result = await run.exit;
+  assert.deepEqual(result, { code: 0, signal: null }, run.stderr());
+}
+
 async function main() {
   await oneShotStubExitsCleanly();
   await sigtermShutsDownCleanly();
+  await rateLimitsApplyPerIp();
   console.log('Provider entrypoint contract tests passed');
 }
 
