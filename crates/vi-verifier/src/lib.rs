@@ -144,7 +144,7 @@ fn run_verification_core(
     let (key_header, commitllm_key_bytes) = decode_project_key(key_bytes)?;
     let (receipt_header, commitllm_receipt_bytes) = decode_project_receipt(receipt_bytes)?;
     check_receipt_identity(&key_header, &receipt_header)?;
-    check_receipt_key_hash(&receipt_header, key_bytes)?;
+    check_receipt_key_hash(&key_header, &receipt_header, key_bytes)?;
 
     let key = serialize::deserialize_key(&commitllm_key_bytes)
         .map_err(|_| corrupt_commitllm("VIKY", "CommitLLM key payload is malformed"))?;
@@ -246,14 +246,20 @@ fn decode_project_audit(bytes: &[u8]) -> Result<(AuditBindingHeader, Vec<u8>), V
     Ok((header, payload.to_vec()))
 }
 
-fn check_receipt_key_hash(receipt: &ReceiptBindingHeader, key_bytes: &[u8]) -> Result<(), ViError> {
+fn check_receipt_key_hash(
+    key: &vi_receipt::KeyBindingHeader,
+    receipt: &ReceiptBindingHeader,
+    key_bytes: &[u8],
+) -> Result<(), ViError> {
     let actual = sha256_hex(key_bytes);
     if receipt.key_hash == actual {
         Ok(())
     } else {
-        Err(ViError::HashMismatch {
-            expected: receipt.key_hash.clone(),
-            actual,
+        Err(ViError::IdentityMismatch {
+            expected: key.identity_fields().with_key_hash(actual),
+            actual: receipt
+                .identity_fields()
+                .with_key_hash(receipt.key_hash.clone()),
         })
     }
 }
@@ -463,7 +469,7 @@ fn corrupt_commitllm(envelope: &'static str, reason: &'static str) -> ViError {
 mod tests {
     use std::collections::BTreeSet;
 
-    use vi_errors::IdentityFields;
+    use vi_errors::{ErrorEnvelope, IdentityFields};
     use vi_receipt::{
         encode_viau_payload, encode_viky_payload, encode_virc_payload, AuditBindingHeader,
         KeyBindingHeader, ReceiptBindingHeader,
@@ -502,10 +508,12 @@ mod tests {
     }
 
     #[test]
-    fn receipt_key_identity_mismatch_is_rejected_before_upstream_verify() {
+    fn receipt_model_identity_mismatch_is_rejected_before_upstream_verify() {
         let key = project_key("model-a");
         let receipt = project_receipt("model-b", &sha256_hex(&key));
         let mut audit_provider = RecordingAuditProvider::default();
+        let expected = IdentityFields::new("model-a", "sha256:checkpoint", COMMITLLM_SHORT_PIN);
+        let actual = IdentityFields::new("model-b", "sha256:checkpoint", COMMITLLM_SHORT_PIN);
 
         let error = verify(&receipt, &key, AuditTier::Routine, &mut audit_provider)
             .expect_err("identity mismatch should fail");
@@ -513,10 +521,63 @@ mod tests {
         assert_eq!(
             error,
             ViError::IdentityMismatch {
-                expected: IdentityFields::new("model-a", "sha256:checkpoint", COMMITLLM_SHORT_PIN),
-                actual: IdentityFields::new("model-b", "sha256:checkpoint", COMMITLLM_SHORT_PIN),
+                expected: expected.clone(),
+                actual: actual.clone(),
             }
         );
+        assert_identity_envelope(&error, &expected, &actual);
+        assert_eq!(audit_provider.calls, 0);
+    }
+
+    #[test]
+    fn receipt_commitllm_pin_mismatch_is_rejected_before_upstream_verify() {
+        let key = project_key("model-a");
+        let receipt = project_receipt_with_identity(
+            "model-a",
+            "sha256:checkpoint",
+            "ffffffff",
+            &sha256_hex(&key),
+        );
+        let mut audit_provider = RecordingAuditProvider::default();
+        let expected = IdentityFields::new("model-a", "sha256:checkpoint", COMMITLLM_SHORT_PIN);
+        let actual = IdentityFields::new("model-a", "sha256:checkpoint", "ffffffff");
+
+        let error = verify(&receipt, &key, AuditTier::Routine, &mut audit_provider)
+            .expect_err("pin mismatch should fail");
+
+        assert_eq!(
+            error,
+            ViError::IdentityMismatch {
+                expected: expected.clone(),
+                actual: actual.clone(),
+            }
+        );
+        assert_identity_envelope(&error, &expected, &actual);
+        assert_eq!(audit_provider.calls, 0);
+    }
+
+    #[test]
+    fn receipt_key_hash_mismatch_is_identity_mismatch_before_upstream_verify() {
+        let key = project_key("model-a");
+        let wrong_key_hash = "sha256:wrong-key";
+        let receipt = project_receipt("model-a", wrong_key_hash);
+        let mut audit_provider = RecordingAuditProvider::default();
+        let expected = IdentityFields::new("model-a", "sha256:checkpoint", COMMITLLM_SHORT_PIN)
+            .with_key_hash(sha256_hex(&key));
+        let actual = IdentityFields::new("model-a", "sha256:checkpoint", COMMITLLM_SHORT_PIN)
+            .with_key_hash(wrong_key_hash);
+
+        let error = verify(&receipt, &key, AuditTier::Routine, &mut audit_provider)
+            .expect_err("key-hash mismatch should fail");
+
+        assert_eq!(
+            error,
+            ViError::IdentityMismatch {
+                expected: expected.clone(),
+                actual: actual.clone(),
+            }
+        );
+        assert_identity_envelope(&error, &expected, &actual);
         assert_eq!(audit_provider.calls, 0);
     }
 
@@ -683,10 +744,19 @@ mod tests {
     }
 
     fn project_receipt(model_id: &str, key_hash: &str) -> Vec<u8> {
+        project_receipt_with_identity(model_id, "sha256:checkpoint", COMMITLLM_SHORT_PIN, key_hash)
+    }
+
+    fn project_receipt_with_identity(
+        model_id: &str,
+        checkpoint_hash: &str,
+        commitllm_pin: &str,
+        key_hash: &str,
+    ) -> Vec<u8> {
         let header = ReceiptBindingHeader::new(
             model_id,
-            "sha256:checkpoint",
-            COMMITLLM_SHORT_PIN,
+            checkpoint_hash,
+            commitllm_pin,
             key_hash,
             "sha256:prompt",
             "sha256:answer",
@@ -784,5 +854,31 @@ mod tests {
             | serde_json::Value::Number(_)
             | serde_json::Value::String(_) => {}
         }
+    }
+
+    fn assert_identity_envelope(
+        error: &ViError,
+        expected: &IdentityFields,
+        actual: &IdentityFields,
+    ) {
+        let envelope = serde_json::to_value(ErrorEnvelope::new("verify", "trace-identity", error))
+            .expect("identity envelope serializes");
+
+        assert_eq!(envelope["category"], "identity_mismatch");
+        assert_eq!(envelope["exit_code"], 7);
+        assert_eq!(envelope["detail"]["expected"], identity_json(expected));
+        assert_eq!(envelope["detail"]["actual"], identity_json(actual));
+    }
+
+    fn identity_json(identity: &IdentityFields) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "model_id": identity.model_id,
+            "checkpoint_hash": identity.checkpoint_hash,
+            "commitllm_pin": identity.commitllm_pin,
+        });
+        if let Some(key_hash) = &identity.key_hash {
+            value["key_hash"] = serde_json::Value::String(key_hash.clone());
+        }
+        value
     }
 }
