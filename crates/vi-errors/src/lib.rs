@@ -394,6 +394,8 @@ pub struct IdentityFields {
     pub checkpoint_hash: String,
     /// Pinned upstream `CommitLLM` revision.
     pub commitllm_pin: String,
+    /// Optional verifier-key envelope hash when the mismatch is key-specific.
+    pub key_hash: Option<String>,
 }
 
 impl IdentityFields {
@@ -408,17 +410,32 @@ impl IdentityFields {
             model_id: model_id.into(),
             checkpoint_hash: checkpoint_hash.into(),
             commitllm_pin: commitllm_pin.into(),
+            key_hash: None,
         }
+    }
+
+    /// Attach a verifier-key envelope hash to identity details.
+    #[must_use]
+    pub fn with_key_hash(mut self, key_hash: impl Into<String>) -> Self {
+        self.key_hash = Some(key_hash.into());
+        self
     }
 }
 
 impl fmt::Display for IdentityFields {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "model_id={}, checkpoint_hash={}, commitllm_pin={}",
-            self.model_id, self.checkpoint_hash, self.commitllm_pin
-        )
+        match &self.key_hash {
+            Some(key_hash) => write!(
+                formatter,
+                "model_id={}, checkpoint_hash={}, commitllm_pin={}, key_hash={}",
+                self.model_id, self.checkpoint_hash, self.commitllm_pin, key_hash
+            ),
+            None => write!(
+                formatter,
+                "model_id={}, checkpoint_hash={}, commitllm_pin={}",
+                self.model_id, self.checkpoint_hash, self.commitllm_pin
+            ),
+        }
     }
 }
 
@@ -518,11 +535,23 @@ fn input_detail(arg: &str, reason: &str, detail: Option<&Value>) -> Value {
 }
 
 fn identity_detail(identity: &IdentityFields) -> Value {
-    serde_json::json!({
-        "model_id": identity.model_id,
-        "checkpoint_hash": identity.checkpoint_hash,
-        "commitllm_pin": identity.commitllm_pin,
-    })
+    let mut fields = Map::new();
+    fields.insert(
+        "model_id".to_owned(),
+        Value::String(identity.model_id.clone()),
+    );
+    fields.insert(
+        "checkpoint_hash".to_owned(),
+        Value::String(identity.checkpoint_hash.clone()),
+    );
+    fields.insert(
+        "commitllm_pin".to_owned(),
+        Value::String(identity.commitllm_pin.clone()),
+    );
+    if let Some(key_hash) = &identity.key_hash {
+        fields.insert("key_hash".to_owned(), Value::String(key_hash.clone()));
+    }
+    Value::Object(fields)
 }
 
 #[cfg(test)]
