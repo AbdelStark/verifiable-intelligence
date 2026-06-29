@@ -10,8 +10,9 @@
 
 use std::{
     ffi::OsString,
+    fs::{self, OpenOptions},
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process,
     sync::Once,
 };
@@ -154,6 +155,35 @@ struct ChatArgs {
         help = "Provider or broker endpoint; defaults to VI_ENDPOINT"
     )]
     endpoint: Option<String>,
+
+    #[arg(
+        short = 'p',
+        long,
+        value_name = "TEXT",
+        help = "User prompt to send as a single OpenAI-compatible user message"
+    )]
+    prompt: String,
+
+    #[arg(
+        long,
+        value_name = "U32",
+        default_value_t = 256,
+        help = "Maximum generated tokens requested from the provider"
+    )]
+    max_tokens: u32,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Destination path for the VIRC receipt; required unless --no-receipt is set"
+    )]
+    receipt_out: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Send a plain OpenAI-compatible request without receipt opt-in"
+    )]
+    no_receipt: bool,
 }
 
 #[derive(Debug, Args)]
@@ -286,10 +316,7 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
 
     match cli.command {
         Some(CliCommand::Keygen(args)) => run_keygen(args, &config),
-        Some(CliCommand::Chat(_)) => {
-            vi_client::placeholder();
-            stub_output("chat", &config)
-        }
+        Some(CliCommand::Chat(args)) => run_chat(&args, &config),
         Some(CliCommand::Verify(_)) => {
             vi_verifier::placeholder();
             stub_output("verify", &config)
@@ -348,6 +375,110 @@ fn run_keygen(args: KeygenArgs, config: &ResolvedConfig) -> Result<Output, ViErr
     object.insert("subcommand".to_owned(), serde_json::json!("keygen"));
 
     json_output(&value, config, "keygen")
+}
+
+fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
+    if args.no_receipt && args.receipt_out.is_some() {
+        return Err(ViError::Input {
+            arg: "--receipt-out".to_owned(),
+            reason: "--receipt-out cannot be used with --no-receipt".to_owned(),
+            detail: None,
+        });
+    }
+    let endpoint = config.endpoint.as_ref().ok_or_else(|| ViError::Input {
+        arg: "--endpoint".to_owned(),
+        reason: "provider endpoint is required; pass --endpoint or set VI_ENDPOINT".to_owned(),
+        detail: None,
+    })?;
+    let body = chat_request_body(&args.prompt, args.max_tokens)?;
+    let client = vi_client::ChatClient::new(endpoint, config.api_key.clone())?;
+    let trace_id = trace_id();
+
+    if args.no_receipt {
+        let response = client.post_chat_completions_without_receipt(&trace_id, body)?;
+        let text = vi_client::parse_openai_chat_response(&response)?;
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "subcommand": "chat",
+            "endpoint": response.endpoint,
+            "status": response.status,
+            "text": text,
+            "warnings": [],
+        });
+        return json_output(&value, config, "chat");
+    }
+
+    let receipt_out = args.receipt_out.as_ref().ok_or_else(|| ViError::Input {
+        arg: "--receipt-out".to_owned(),
+        reason: "--receipt-out is required unless --no-receipt is set".to_owned(),
+        detail: None,
+    })?;
+    let response = client.post_chat_completions(&trace_id, body)?;
+    let parsed = vi_client::parse_chat_response(&response)?;
+    let receipt_bytes = parsed
+        .receipt_bytes
+        .ok_or_else(|| ViError::ReceiptMissing {
+            endpoint: response.endpoint.clone(),
+            content_type: response.content_type.clone().unwrap_or_default(),
+        })?;
+    write_binary_output(receipt_out, &receipt_bytes)?;
+    let value = serde_json::json!({
+        "schema_version": 1,
+        "subcommand": "chat",
+        "endpoint": response.endpoint,
+        "status": response.status,
+        "text": parsed.text,
+        "receipt": {
+            "path": receipt_out,
+            "size_bytes": receipt_bytes.len(),
+        },
+        "warnings": parsed.warning.into_iter().collect::<Vec<_>>(),
+    });
+
+    json_output(&value, config, "chat")
+}
+
+fn chat_request_body(prompt: &str, max_tokens: u32) -> Result<String, ViError> {
+    serde_json::to_string(&serde_json::json!({
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        "max_tokens": max_tokens,
+    }))
+    .map_err(|error| ViError::Internal {
+        backtrace: format!("failed to serialize chat request: {error}"),
+    })
+}
+
+fn write_binary_output(path: &Path, bytes: &[u8]) -> Result<(), ViError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|error| ViError::Input {
+            arg: path.display().to_string(),
+            reason: format!("failed to create output directory: {error}"),
+            detail: None,
+        })?;
+    }
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| ViError::Input {
+            arg: path.display().to_string(),
+            reason: format!("failed to open output file: {error}"),
+            detail: None,
+        })?;
+    file.write_all(bytes).map_err(|error| ViError::Input {
+        arg: path.display().to_string(),
+        reason: format!("failed to write output file: {error}"),
+        detail: None,
+    })
 }
 
 fn stub_output(subcommand: &'static str, config: &ResolvedConfig) -> Result<Output, ViError> {
@@ -541,14 +672,20 @@ mod tests {
 
     #[test]
     fn endpoint_env_applies_only_to_endpoint_subcommands() {
-        let chat = Cli::try_parse_from(["vi", "chat"]).expect("chat parses");
+        let chat = Cli::try_parse_from(["vi", "chat", "--prompt", "hello"]).expect("chat parses");
         let chat_config =
             ResolvedConfig::from_sources(&chat, fake_env(&[(ENDPOINT_ENV, "https://env.example")]));
         assert_eq!(chat_config.endpoint.as_deref(), Some("https://env.example"));
 
-        let chat_with_flag =
-            Cli::try_parse_from(["vi", "chat", "--endpoint", "https://flag.example"])
-                .expect("chat with endpoint parses");
+        let chat_with_flag = Cli::try_parse_from([
+            "vi",
+            "chat",
+            "--endpoint",
+            "https://flag.example",
+            "--prompt",
+            "hello",
+        ])
+        .expect("chat with endpoint parses");
         let flag_config = ResolvedConfig::from_sources(
             &chat_with_flag,
             fake_env(&[(ENDPOINT_ENV, "https://env.example")]),

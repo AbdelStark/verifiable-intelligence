@@ -69,3 +69,19 @@ fn keygen_help_lists_public_flags() {
     assert!(stdout.contains("--expected-checkpoint-hash <SHA256>"));
     assert!(stdout.contains("--allow-checkpoint-drift"));
 }
+
+#[test]
+fn chat_help_lists_public_flags() {
+    let output = vi_command()
+        .args(["chat", "--help"])
+        .output()
+        .expect("vi should run");
+
+    assert!(output.status.success());
+    let stdout = stdout_utf8(&output);
+    assert!(stdout.contains("--endpoint <URL>"));
+    assert!(stdout.contains("--prompt <TEXT>"));
+    assert!(stdout.contains("--max-tokens <U32>"));
+    assert!(stdout.contains("--receipt-out <PATH>"));
+    assert!(stdout.contains("--no-receipt"));
+}
