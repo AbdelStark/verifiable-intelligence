@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "subcommand": "tui",
+  "status": "stub",
+  "endpoint": "https://provider.example",
+  "tamper": "byte-flip",
+  "phase_delay_ms": 250
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "subcommand": "chat",
+  "endpoint": "https://provider.example/v1/chat/completions",
+  "status": 200,
+  "text": "fixture answer",
+  "receipt": {
+    "path": "answer.virc",
+    "size_bytes": 42
+  },
+  "warnings": []
+}

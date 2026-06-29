@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "subcommand": "keygen",
+  "model_id": "toy-model",
+  "checkpoint_hash": "sha256:checkpoint",
+  "key_hash": "sha256:key",
+  "key_size_bytes": 1234,
+  "output": "toy.viky",
+  "seed": 7,
+  "commitllm_revision": "25541e83347655e44ad6e84eb901e1e7ae392a66",
+  "commitllm_pin": "25541e83",
+  "warnings": []
+}

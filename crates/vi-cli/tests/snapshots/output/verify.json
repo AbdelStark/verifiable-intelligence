@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "subcommand": "verify",
+  "tier": "full",
+  "verdict": "pass",
+  "phases": [
+    "embedding_merkle",
+    "shell_freivalds",
+    "bridge_replay",
+    "attention_corridor",
+    "kv_provenance",
+    "lm_head",
+    "decode_policy"
+  ],
+  "checks_run": 7,
+  "checks_passed": 7,
+  "warnings": [],
+  "elapsed_ms": 11
+}
