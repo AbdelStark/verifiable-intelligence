@@ -762,6 +762,8 @@ dependencies = [
 name = "vi-keygen"
 version = "0.0.0"
 dependencies = [
+ "sha2",
+ "tempfile",
  "vi-errors",
  "vi-receipt",
 ]
