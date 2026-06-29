@@ -8,9 +8,12 @@ const manifestPath = path.join(fixtureDir, 'manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const schemaPath = path.resolve(fixtureDir, manifest.schema);
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+const keygenSchemaPath = path.join(root, 'schemas', 'keygen-output.schema.json');
+const keygenFixturePath = path.join(root, 'crates', 'vi-cli', 'tests', 'snapshots', 'output', 'keygen.json');
 
 const ajv = new Ajv({ allErrors: true });
 const validate = ajv.compile(schema);
+const validateKeygen = ajv.compile(JSON.parse(fs.readFileSync(keygenSchemaPath, 'utf8')));
 const rawFieldNames = new Set(['prompt', 'raw_prompt', 'messages', 'answer', 'raw_answer', 'text']);
 
 function collectRawFields(value, trail = []) {
@@ -81,9 +84,19 @@ for (const fixture of manifest.fixtures) {
   }
 }
 
+const keygenOutput = JSON.parse(fs.readFileSync(keygenFixturePath, 'utf8'));
+if (!validateKeygen(keygenOutput)) {
+  failures.push(
+    `${path.relative(root, keygenFixturePath)}: schema errors: ${ajv.errorsText(validateKeygen.errors)}`
+  );
+}
+
 if (failures.length) {
   console.error(failures.join('\n'));
   process.exit(1);
 }
 
 console.log(`Validated ${manifest.fixtures.length} VIEX fixtures against ${path.relative(root, schemaPath)}`);
+console.log(
+  `Validated keygen output fixture against ${path.relative(root, keygenSchemaPath)}`
+);
