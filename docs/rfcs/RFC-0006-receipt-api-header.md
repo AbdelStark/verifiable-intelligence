@@ -87,7 +87,7 @@ Note: the `503` choice is deliberate so that a CommitLLM-degraded provider still
 
 ## Drawbacks
 
-- `multipart/mixed` parsing is not universal in HTTP client libraries. Mitigation: the CLI implements it; the WASM verifier (v1.1) implements it; third-party integrations can fall back to a "receipt-only" endpoint (future). For v1, `vi chat` is the recommended client.
+- `multipart/mixed` parsing is not universal in HTTP client libraries. Mitigation: the CLI implements it; the browser verifier spike from [RFC-0016](./RFC-0016-marketplace-demo-pivot.md) must account for it; third-party integrations can fall back to a "receipt-only" endpoint (future).
 - The `X-` prefix is deprecated by RFC 6648, but in practice every meaningful header in operations still uses it; the alternative ("`Vi-Receipt`") looks like an internal codename. We accept the deprecation in exchange for legibility.
 
 ## Migration / Rollout

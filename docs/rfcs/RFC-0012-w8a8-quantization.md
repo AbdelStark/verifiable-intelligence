@@ -9,6 +9,8 @@
 
 Until a maintained W8A8 quantization of Llama 3.2 1B Instruct is hosted on Hugging Face under a trustworthy maintainer, this project produces and hosts its own. The quantization uses `llm-compressor` with the same recipe CommitLLM applies to Llama 3.1 8B, parameterized for 1B. The output is published to `AbdelStark/Llama-3.2-1B-Instruct-quantized.w8a8` with a documented canonical hash and a `recipe.yaml` in the repo. If an upstream-maintained W8A8 of the same checkpoint becomes available later, the project switches the canonical pointer to it as a documented MINOR-with-pin-change event.
 
+**Pivot note, 2026-06-29:** after [RFC-0016](./RFC-0016-marketplace-demo-pivot.md), this model-specific quantization plan no longer blocks v1. It remains valid only if Llama 3.2 1B is selected as the live model.
+
 ## Motivation
 
 Llama 3.2 1B Instruct W8A8 is the v1 model. The base FP16 checkpoint is on HF; the W8A8 variant may or may not be hosted by a maintainer we trust ([PRD OQ-2](../../PRD.md)). The provider image bakes weights in at build time; `vi keygen` reads them. Both need a stable source. We take responsibility for hosting and reproducibility.

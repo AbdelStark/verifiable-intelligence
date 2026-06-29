@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>verifiable-intelligence proof market demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0a0c0a;
+      --bg-2:#0f1310;
+      --panel:#101611;
+      --line:#1f2a22;
+      --line-2:#2a3a2e;
+      --ink:#dde8de;
+      --ink-dim:#8a9a8c;
+      --ink-faint:#5b6b5d;
+      --paper:#f0ebe0;
+      --acid:#9aff5e;
+      --acid-dim:#6db838;
+      --acid-glow:rgba(154,255,94,.16);
+      --amber:#ffb454;
+      --rose:#ff6b8b;
+      --azure:#7cc4ff;
+      --violet:#c8a4ff;
+      --mono:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --serif:'Newsreader', Georgia, 'Times New Roman', serif;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:
+        linear-gradient(90deg, rgba(154,255,94,.035) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(154,255,94,.025) 1px, transparent 1px),
+        var(--bg);
+      background-size:36px 36px;
+      color:var(--ink);
+      font:400 13px/1.55 var(--mono);
+    }
+    button, textarea{font:inherit}
+    button{cursor:pointer}
+    .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+    .topbar{
+      position:sticky;
+      top:0;
+      z-index:10;
+      background:rgba(10,12,10,.92);
+      backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--line);
+    }
+    .topbar .wrap{
+      min-height:54px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+    }
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      min-width:0;
+    }
+    .mark{
+      width:24px;
+      height:24px;
+      border:1px solid var(--acid);
+      background:var(--acid-glow);
+      display:grid;
+      place-items:center;
+      color:var(--acid);
+      font:700 11px/1 var(--mono);
+    }
+    .brand b{
+      color:var(--paper);
+      font:700 13px/1 var(--mono);
+      letter-spacing:.04em;
+      white-space:nowrap;
+    }
+    .brand span{
+      color:var(--ink-faint);
+      font:500 10px/1 var(--mono);
+      letter-spacing:.16em;
+      text-transform:uppercase;
+    }
+    .status-strip{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .chip{
+      border:1px solid var(--line-2);
+      color:var(--ink-dim);
+      background:var(--bg-2);
+      padding:7px 9px;
+      font:500 10px/1 var(--mono);
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      white-space:nowrap;
+    }
+    .chip.ok{border-color:rgba(154,255,94,.55);color:var(--acid)}
+    .chip.warn{border-color:rgba(255,180,84,.55);color:var(--amber)}
+    .app{
+      display:grid;
+      grid-template-columns:320px minmax(0,1fr) 340px;
+      gap:16px;
+      padding:20px 0 28px;
+      align-items:start;
+    }
+    .panel{
+      border:1px solid var(--line-2);
+      background:rgba(15,19,16,.94);
+      min-width:0;
+    }
+    .panel-h{
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      color:var(--acid);
+      font:700 10px/1 var(--mono);
+      letter-spacing:.18em;
+      text-transform:uppercase;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .panel-h small{
+      color:var(--ink-faint);
+      font:500 10px/1 var(--mono);
+      letter-spacing:.08em;
+      text-transform:none;
+    }
+    .panel-b{padding:14px}
+    .provider{
+      width:100%;
+      text-align:left;
+      border:1px solid var(--line);
+      background:var(--panel);
+      color:var(--ink);
+      padding:12px;
+      margin-bottom:10px;
+      transition:border-color .15s, background .15s;
+    }
+    .provider:hover,
+    .provider.active{
+      border-color:var(--acid);
+      background:#121b13;
+    }
+    .provider .row{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:flex-start;
+    }
+    .provider h3{
+      margin:0 0 6px;
+      color:var(--paper);
+      font:700 13px/1.25 var(--mono);
+    }
+    .tag{
+      display:inline-block;
+      color:var(--bg);
+      background:var(--acid);
+      padding:4px 6px;
+      font:700 9px/1 var(--mono);
+      letter-spacing:.1em;
+      text-transform:uppercase;
+    }
+    .tag.warn{background:var(--amber)}
+    .tag.bad{background:var(--rose)}
+    .provider p{
+      margin:0 0 10px;
+      color:var(--ink-dim);
+      font:400 13px/1.42 var(--serif);
+    }
+    .kv{
+      display:grid;
+      grid-template-columns:110px minmax(0,1fr);
+      gap:5px 10px;
+      padding-top:8px;
+      border-top:1px dashed var(--line);
+      font:500 10px/1.35 var(--mono);
+    }
+    .kv span:nth-child(odd){color:var(--ink-faint);text-transform:uppercase;letter-spacing:.12em}
+    .kv span:nth-child(even){color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .prompt{
+      width:100%;
+      min-height:112px;
+      resize:vertical;
+      border:1px solid var(--line-2);
+      background:#080b08;
+      color:var(--paper);
+      padding:12px;
+      outline:none;
+      line-height:1.55;
+    }
+    .prompt:focus{border-color:var(--acid)}
+    .controls{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top:10px;
+    }
+    .btn{
+      border:1px solid var(--line-2);
+      background:var(--bg-2);
+      color:var(--ink);
+      padding:10px 12px;
+      font:700 10px/1 var(--mono);
+      letter-spacing:.12em;
+      text-transform:uppercase;
+    }
+    .btn:hover{border-color:var(--acid);color:var(--acid)}
+    .btn.primary{
+      color:var(--bg);
+      background:var(--acid);
+      border-color:var(--acid);
+    }
+    .btn.primary:hover{background:var(--acid-dim);color:var(--bg)}
+    .modes{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:8px;
+      margin-top:12px;
+    }
+    .mode{
+      border:1px solid var(--line);
+      background:transparent;
+      color:var(--ink-dim);
+      padding:9px 6px;
+      min-height:42px;
+      font:700 9px/1.25 var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .mode.active{border-color:var(--acid);color:var(--acid);background:var(--acid-glow)}
+    .answer{
+      min-height:96px;
+      border:1px solid var(--line);
+      background:#090d0a;
+      color:var(--paper);
+      padding:14px;
+      font:400 17px/1.55 var(--serif);
+    }
+    .answer.empty{color:var(--ink-faint);font:500 12px/1.5 var(--mono)}
+    .proof-head{
+      display:grid;
+      grid-template-columns:120px minmax(0,1fr);
+      gap:14px;
+      align-items:center;
+    }
+    .verdict{
+      aspect-ratio:1;
+      border:1px solid var(--line-2);
+      background:var(--bg);
+      display:grid;
+      place-items:center;
+      text-align:center;
+    }
+    .verdict b{
+      display:block;
+      color:var(--acid);
+      font:700 22px/1 var(--mono);
+      letter-spacing:.08em;
+    }
+    .verdict.fail b{color:var(--rose)}
+    .verdict.unsupported b{color:var(--amber);font-size:14px}
+    .verdict span{
+      color:var(--ink-faint);
+      font:500 9px/1 var(--mono);
+      letter-spacing:.14em;
+      text-transform:uppercase;
+    }
+    .summary h2{
+      margin:0 0 7px;
+      color:var(--paper);
+      font:700 18px/1.22 var(--mono);
+    }
+    .summary p{
+      margin:0;
+      color:var(--ink-dim);
+      font:400 14px/1.52 var(--serif);
+    }
+    .check-list{margin-top:14px}
+    .check{
+      display:grid;
+      grid-template-columns:78px minmax(0,1fr) 82px;
+      gap:10px;
+      align-items:start;
+      padding:10px 0;
+      border-top:1px dashed var(--line);
+      font:500 11px/1.35 var(--mono);
+    }
+    .check .cls{
+      color:var(--ink-faint);
+      text-transform:uppercase;
+      letter-spacing:.1em;
+      font-size:9px;
+    }
+    .check .name{color:var(--paper)}
+    .check .detail{
+      grid-column:2 / 3;
+      color:var(--ink-dim);
+      font:400 13px/1.35 var(--serif);
+    }
+    .badge{
+      text-align:center;
+      color:var(--acid);
+      border:1px solid rgba(154,255,94,.45);
+      padding:5px 6px;
+      font:700 9px/1 var(--mono);
+      letter-spacing:.1em;
+      text-transform:uppercase;
+    }
+    .badge.fail{color:var(--rose);border-color:rgba(255,107,139,.55)}
+    .badge.warn{color:var(--amber);border-color:rgba(255,180,84,.55)}
+    .bundle{
+      margin:0;
+      max-height:360px;
+      overflow:auto;
+      background:#080b08;
+      border:1px solid var(--line);
+      color:#cde8c7;
+      padding:12px;
+      font:400 11px/1.45 var(--mono);
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .flow{
+      width:100%;
+      height:auto;
+      display:block;
+      background:#080b08;
+      border:1px solid var(--line);
+      margin-top:12px;
+    }
+    .limits{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:10px;
+      margin-top:12px;
+    }
+    .limit{
+      border:1px solid var(--line);
+      background:#0b100c;
+      padding:10px;
+      min-height:76px;
+    }
+    .limit b{
+      display:block;
+      color:var(--paper);
+      font:700 10px/1.2 var(--mono);
+      letter-spacing:.1em;
+      text-transform:uppercase;
+      margin-bottom:7px;
+    }
+    .limit p{
+      margin:0;
+      color:var(--ink-dim);
+      font:400 13px/1.35 var(--serif);
+    }
+    @media (max-width:1060px){
+      .app{grid-template-columns:300px minmax(0,1fr)}
+      .right{grid-column:1 / -1}
+    }
+    @media (max-width:760px){
+      .topbar .wrap{align-items:flex-start;flex-direction:column;padding-top:12px;padding-bottom:12px}
+      .status-strip{justify-content:flex-start}
+      .app{grid-template-columns:1fr;padding-top:14px}
+      .modes{grid-template-columns:repeat(2,1fr)}
+      .proof-head{grid-template-columns:1fr}
+      .verdict{aspect-ratio:auto;min-height:86px}
+      .check{grid-template-columns:70px minmax(0,1fr)}
+      .check .badge{grid-column:1 / -1;text-align:left}
+      .check .detail{grid-column:2 / 3}
+      .limits{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <div class="brand">
+        <div class="mark">VI</div>
+        <div>
+          <b>verifiable-intelligence</b><br>
+          <span>proof market demo</span>
+        </div>
+      </div>
+      <div class="status-strip">
+        <span class="chip ok">open-weight only</span>
+        <span class="chip ok">CommitLLM receipt</span>
+        <span class="chip warn">research prototype</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap app">
+    <section class="panel left">
+      <div class="panel-h">provider book <small id="providerCount">3 providers</small></div>
+      <div class="panel-b" id="providers"></div>
+      <div class="panel-h">failure mode</div>
+      <div class="panel-b">
+        <div class="modes" id="modes"></div>
+      </div>
+    </section>
+
+    <section class="panel center">
+      <div class="panel-h">buyer request <small id="quoteId">quote pending</small></div>
+      <div class="panel-b">
+        <textarea class="prompt" id="prompt">Explain in one sentence why rainbows have ordered colors.</textarea>
+        <div class="controls">
+          <button class="btn primary" id="runBtn" data-testid="run-verify">run verify</button>
+          <button class="btn" id="copyBtn" data-testid="copy-bundle">copy bundle</button>
+          <button class="btn" id="downloadBtn" data-testid="download-bundle">download json</button>
+        </div>
+        <svg class="flow" id="flow" viewBox="0 0 760 210" role="img" aria-label="proof flow"></svg>
+      </div>
+      <div class="panel-h">delivered answer</div>
+      <div class="panel-b">
+        <div class="answer empty" id="answer">No response yet.</div>
+      </div>
+      <div class="panel-h">boundary</div>
+      <div class="panel-b">
+        <div class="limits">
+          <div class="limit">
+            <b>not closed models</b>
+            <p>Closed-weight providers need their own compatible attestation. This demo rejects them.</p>
+          </div>
+          <div class="limit">
+            <b>not answer truth</b>
+            <p>The proof checks execution integrity. It does not certify that the answer is factually correct.</p>
+          </div>
+          <div class="limit">
+            <b>not resale infra</b>
+            <p>No credential collection, account pooling, billing bypass, or unauthorized token resale.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel right">
+      <div class="panel-h">proof card <small id="checkedAt">not run</small></div>
+      <div class="panel-b">
+        <div class="proof-head">
+          <div class="verdict" id="verdict" data-testid="verdict">
+            <div><b>IDLE</b><span>verdict</span></div>
+          </div>
+          <div class="summary">
+            <h2 id="proofTitle">No proof bundle</h2>
+            <p id="proofSummary">Run a provider request to generate a quote, receipt, and verification report.</p>
+          </div>
+        </div>
+        <div class="check-list" id="checks"></div>
+      </div>
+      <div class="panel-h">VIEX bundle <small id="bundleSize">0 bytes</small></div>
+      <div class="panel-b">
+        <pre class="bundle" id="bundle" data-testid="bundle">{}</pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const PROVIDERS = [
+      {
+        id:'lab-l4-01',
+        name:'Lab L4 01',
+        status:'verified',
+        tag:'verified',
+        model:'llama-3.1-8b-w8a8',
+        actualModel:'llama-3.1-8b-w8a8',
+        checkpoint:'sha256:8f61a9c0b1d7e2c4f7e894319a0e5a678e1d4b2c3a9f0d6e7b8c1a2d3e4f5960',
+        key:'sha256:2b9f77c9a184df28b74cbd26e714b0e5b5ef72cc4d09514c18e4bc1a227f8001',
+        pin:'95c0ffee',
+        price:'0.012',
+        desc:'Authorized open-weight provider with receipt and audit support.'
+      },
+      {
+        id:'desk-a10g-cheap',
+        name:'Desk A10G cheap',
+        status:'receiptless',
+        tag:'cheap',
+        model:'llama-3.1-8b-w8a8',
+        actualModel:'llama-3.1-8b-w8a8',
+        checkpoint:'sha256:8f61a9c0b1d7e2c4f7e894319a0e5a678e1d4b2c3a9f0d6e7b8c1a2d3e4f5960',
+        key:'sha256:2b9f77c9a184df28b74cbd26e714b0e5b5ef72cc4d09514c18e4bc1a227f8001',
+        pin:'95c0ffee',
+        price:'0.004',
+        desc:'Low price, but no receipt. The verifier cannot turn text into evidence.'
+      },
+      {
+        id:'frontier-proxy-x',
+        name:'Frontier Proxy X',
+        status:'unsupported',
+        tag:'unsupported',
+        model:'closed-frontier-claimed',
+        actualModel:'unknown-closed',
+        checkpoint:'sha256:unavailable',
+        key:'sha256:unavailable',
+        pin:'none',
+        price:'0.030',
+        desc:'Claims a closed model. CommitLLM cannot verify private weights in v1.'
+      }
+    ];
+
+    const MODES = [
+      ['honest','honest'],
+      ['model_swap','model swap'],
+      ['prompt_mismatch','prompt edit'],
+      ['answer_rewrite','answer rewrite'],
+      ['receipt_tamper','receipt tamper'],
+      ['expired_quote','expired quote']
+    ];
+
+    const state = {
+      providerId:'lab-l4-01',
+      mode:'honest',
+      bundle:null
+    };
+
+    const el = id => document.getElementById(id);
+    const enc = new TextEncoder();
+
+    async function sha256(text){
+      if (globalThis.crypto && globalThis.crypto.subtle){
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', enc.encode(text));
+        return 'sha256:' + Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+      }
+      let h = 2166136261;
+      for (let i = 0; i < text.length; i++){
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return 'sha256:fallback' + (h >>> 0).toString(16).padStart(8,'0');
+    }
+
+    function shortHash(v){
+      if (!v) return 'none';
+      return v.length > 22 ? v.slice(0,15) + '...' + v.slice(-6) : v;
+    }
+
+    function selectedProvider(){
+      return PROVIDERS.find(p => p.id === state.providerId) || PROVIDERS[0];
+    }
+
+    function renderProviders(){
+      el('providers').innerHTML = PROVIDERS.map(p => {
+        const active = p.id === state.providerId ? ' active' : '';
+        const tagClass = p.status === 'verified' ? '' : p.status === 'unsupported' ? ' bad' : ' warn';
+        return `
+          <button class="provider${active}" data-provider="${p.id}" data-testid="provider-${p.id}">
+            <div class="row">
+              <div>
+                <h3>${p.name}</h3>
+                <p>${p.desc}</p>
+              </div>
+              <span class="tag${tagClass}">${p.tag}</span>
+            </div>
+            <div class="kv">
+              <span>model</span><span>${p.model}</span>
+              <span>key</span><span>${shortHash(p.key)}</span>
+              <span>price</span><span>$${p.price} / 1k tok</span>
+            </div>
+          </button>
+        `;
+      }).join('');
+      document.querySelectorAll('[data-provider]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.providerId = btn.dataset.provider;
+          renderAllStatic();
+        });
+      });
+    }
+
+    function renderModes(){
+      el('modes').innerHTML = MODES.map(([id,label]) => {
+        const active = id === state.mode ? ' active' : '';
+        return `<button class="mode${active}" data-mode="${id}" data-testid="mode-${id}">${label}</button>`;
+      }).join('');
+      document.querySelectorAll('[data-mode]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.mode = btn.dataset.mode;
+          renderAllStatic();
+        });
+      });
+    }
+
+    function answerFor(prompt, provider){
+      if (provider.status === 'unsupported'){
+        return 'Unsupported provider: no public checkpoint or compatible CommitLLM verifier key is available.';
+      }
+      if (provider.status === 'receiptless'){
+        return 'Rainbows separate sunlight because water droplets refract and reflect different wavelengths at different angles.';
+      }
+      return 'Rainbows show ordered colors because water droplets refract, reflect, and disperse sunlight so each wavelength exits at a different angle.';
+    }
+
+    function buildChecks(bundle, provider){
+      const mode = state.mode;
+      const unsupported = provider.status === 'unsupported';
+      const receiptless = provider.status === 'receiptless';
+      const checks = [
+        {
+          id:'quote_freshness',
+          class:'structural',
+          name:'quote freshness',
+          status:mode === 'expired_quote' ? 'fail' : 'pass',
+          detail:mode === 'expired_quote' ? 'quote expiry is before verification time' : 'quote is inside its validity window'
+        },
+        {
+          id:'provider_eligibility',
+          class:'structural',
+          name:'provider eligibility',
+          status:unsupported ? 'unsupported' : 'pass',
+          detail:unsupported ? 'closed-weight or unknown provider cannot publish required verifier material' : 'provider is in the authorized open-weight catalog'
+        },
+        {
+          id:'model_binding',
+          class:'exact',
+          name:'model and key binding',
+          status:(mode === 'model_swap' || provider.status === 'receiptless') ? 'fail' : unsupported ? 'unsupported' : 'pass',
+          detail:mode === 'model_swap' ? 'receipt key_hash belongs to qwen2.5-7b-w8a8, quote claims llama-3.1-8b-w8a8' : provider.status === 'receiptless' ? 'no receipt was returned' : unsupported ? 'no public key exists for this model' : 'quote key_hash, checkpoint hash, and receipt model identity agree'
+        },
+        {
+          id:'prompt_binding',
+          class:'exact',
+          name:'prompt binding',
+          status:mode === 'prompt_mismatch' ? 'fail' : unsupported || receiptless ? (unsupported ? 'unsupported' : 'fail') : 'pass',
+          detail:mode === 'prompt_mismatch' ? 'receipt prompt_hash does not match buyer prompt hash' : receiptless ? 'missing receipt prevents prompt binding' : unsupported ? 'unsupported model path' : 'buyer prompt hash matches receipt request binding'
+        },
+        {
+          id:'receipt_integrity',
+          class:'algebraic',
+          name:'receipt integrity',
+          status:mode === 'receipt_tamper' || receiptless ? 'fail' : unsupported ? 'unsupported' : 'pass',
+          detail:mode === 'receipt_tamper' ? 'receipt bytes fail commitment verification' : receiptless ? 'provider did not return a CommitLLM receipt' : unsupported ? 'unsupported model path' : 'CommitLLM receipt validates under the pinned verifier'
+        },
+        {
+          id:'decode_policy',
+          class:'exact',
+          name:'decode policy',
+          status:unsupported || receiptless ? (unsupported ? 'unsupported' : 'fail') : 'pass',
+          detail:unsupported ? 'decode policy cannot be replayed for private weights' : receiptless ? 'missing receipt prevents decode-policy replay' : 'temperature, top_p, token count, and output policy are bound'
+        },
+        {
+          id:'answer_binding',
+          class:'exact',
+          name:'delivered answer',
+          status:mode === 'answer_rewrite' || receiptless ? 'fail' : unsupported ? 'unsupported' : 'pass',
+          detail:mode === 'answer_rewrite' ? 'displayed answer hash differs from committed delivered-answer hash' : receiptless ? 'missing receipt prevents answer binding' : unsupported ? 'unsupported model path' : 'displayed answer hash matches committed output path'
+        },
+        {
+          id:'attention_boundary',
+          class:'open',
+          name:'attention boundary',
+          status:unsupported ? 'unsupported' : 'warn',
+          detail:'CommitLLM upstream documents arbitrary-position attention output as open on stock GPU kernels'
+        }
+      ];
+      bundle.report.checks = checks;
+      const hardFail = checks.some(c => c.status === 'fail');
+      const blocked = checks.some(c => c.status === 'unsupported');
+      bundle.report.overall = blocked ? 'unsupported' : hardFail ? 'fail' : 'pass';
+      return checks;
+    }
+
+    async function runDemo(){
+      const provider = selectedProvider();
+      const prompt = el('prompt').value.trim() || 'Explain rainbows.';
+      const now = Date.now();
+      const quoteId = 'qt_' + provider.id.replaceAll('-','_') + '_' + now.toString(36);
+      const requestId = 'req_' + now.toString(36);
+      const answer = answerFor(prompt, provider);
+      const shownAnswer = state.mode === 'answer_rewrite'
+        ? answer + ' This final sentence was added after the committed path.'
+        : answer;
+      const promptForReceipt = state.mode === 'prompt_mismatch'
+        ? prompt + ' hidden broker edit'
+        : prompt;
+      const receiptModel = state.mode === 'model_swap'
+        ? 'qwen2.5-7b-w8a8'
+        : provider.actualModel;
+      const promptHash = await sha256(prompt);
+      const receiptPromptHash = await sha256(promptForReceipt);
+      const answerHash = await sha256(shownAnswer);
+      const committedAnswerHash = await sha256(answer);
+      const receiptMaterial = JSON.stringify({
+        requestId,
+        receiptModel,
+        promptHash:receiptPromptHash,
+        answerHash:committedAnswerHash,
+        pin:provider.pin,
+        tampered:state.mode === 'receipt_tamper'
+      });
+      const receiptHash = await sha256(receiptMaterial);
+      const bundle = {
+        magic:'VIEX',
+        schema_version:1,
+        created_unix_ms:now,
+        quote:{
+          quote_id:quoteId,
+          provider_id:provider.id,
+          model_id:provider.model,
+          checkpoint_hash:provider.checkpoint,
+          commitllm_pin:provider.pin,
+          key_hash:provider.key,
+          decode_policy_hash:await sha256(JSON.stringify({temperature:0.2, top_p:0.95, max_tokens:256})),
+          price:{currency:'USD', estimated:'0.0048', per_1k_tokens:provider.price},
+          expires_unix_ms:state.mode === 'expired_quote' ? now - 1000 : now + 300000,
+          signature:'demo:' + quoteId
+        },
+        request:{
+          request_id:requestId,
+          prompt_hash:promptHash,
+          input_spec_hash:await sha256('tokenizer:llama-chat-template:v1'),
+          max_tokens:256
+        },
+        response:{
+          answer_hash:answerHash,
+          answer_preview:shownAnswer.slice(0,180),
+          generated_token_count:31,
+          output_spec_hash:await sha256('detokenize:committed-path:v1')
+        },
+        receipt:{
+          encoding:provider.status === 'receiptless' ? 'missing' : 'base64',
+          content_type:'application/vnd.verifiable-intelligence.receipt+binary',
+          bytes_b64:provider.status === 'receiptless' ? '' : btoa(receiptMaterial),
+          sha256:receiptHash,
+          size_bytes:provider.status === 'receiptless' ? 0 : receiptMaterial.length
+        },
+        verifier:{
+          key_hash:state.mode === 'model_swap' ? 'sha256:qwen-key-used-by-receipt' : provider.key,
+          key_ref:'demo://keys/' + provider.id,
+          commitllm_pin:provider.pin,
+          verifier_version:'demo-0.1',
+          verification_mode:'browser-simulated'
+        },
+        audit:{
+          audit_endpoint:'demo://providers/' + provider.id + '/v1/audit',
+          tier:'routine',
+          challenge:{token_index:7, layer_indices:[3,11,19,27]},
+          payload_hash:provider.status === 'receiptless' ? '' : await sha256('audit:' + requestId)
+        },
+        report:{
+          overall:'not_run',
+          checked_at_unix_ms:now,
+          checks:[],
+          warnings:[],
+          unsupported:[]
+        }
+      };
+      buildChecks(bundle, provider);
+      state.bundle = bundle;
+      el('quoteId').textContent = quoteId;
+      el('checkedAt').textContent = new Date(now).toLocaleTimeString();
+      el('answer').classList.remove('empty');
+      el('answer').textContent = shownAnswer;
+      renderReport();
+      renderFlow(bundle.report.overall);
+    }
+
+    function renderReport(){
+      const bundle = state.bundle;
+      if (!bundle) return;
+      const overall = bundle.report.overall;
+      const verdict = el('verdict');
+      verdict.className = 'verdict ' + (overall === 'fail' ? 'fail' : overall === 'unsupported' ? 'unsupported' : '');
+      verdict.innerHTML = `<div><b>${overall.toUpperCase()}</b><span>verdict</span></div>`;
+      el('proofTitle').textContent = overall === 'pass'
+        ? 'Quote satisfied by receipt'
+        : overall === 'unsupported'
+          ? 'Provider cannot be verified'
+          : 'Quote not satisfied';
+      el('proofSummary').textContent = overall === 'pass'
+        ? 'Model identity, prompt hash, decode policy, delivered answer, and receipt checks agree under the simulated CommitLLM path.'
+        : overall === 'unsupported'
+          ? 'The selected provider does not expose public verifier material for CommitLLM verification.'
+          : 'At least one binding failed. The answer may still be plausible text, but it is not evidence for the quoted model.';
+      el('checks').innerHTML = bundle.report.checks.map(c => {
+        const klass = c.status === 'fail' ? 'fail' : c.status === 'warn' || c.status === 'unsupported' ? 'warn' : '';
+        return `
+          <div class="check">
+            <div class="cls">${c.class}</div>
+            <div class="name">${c.name}</div>
+            <div class="badge ${klass}">${c.status}</div>
+            <div class="detail">${c.detail}</div>
+          </div>
+        `;
+      }).join('');
+      const text = JSON.stringify(bundle, null, 2);
+      el('bundle').textContent = text;
+      el('bundleSize').textContent = new Blob([text]).size + ' bytes';
+    }
+
+    function renderFlow(overall){
+      const colors = {
+        pass:'#9aff5e',
+        fail:'#ff6b8b',
+        unsupported:'#ffb454',
+        idle:'#5b6b5d'
+      };
+      const color = colors[overall] || colors.idle;
+      const nodes = [
+        ['quote',70,56],
+        ['prompt',200,56],
+        ['receipt',330,56],
+        ['audit',460,56],
+        ['verify',590,56]
+      ];
+      const paths = nodes.slice(0,-1).map((n,i) => {
+        const next = nodes[i+1];
+        return `<path d="M${n[1]+72} ${n[2]+34} L${next[1]-8} ${next[2]+34}" stroke="#5b6b5d" stroke-width="2" marker-end="url(#arr)"/>`;
+      }).join('');
+      const rects = nodes.map(n => `
+        <g>
+          <rect x="${n[1]}" y="${n[2]}" width="96" height="68" fill="#101611" stroke="${color}" stroke-width="1.5"/>
+          <text x="${n[1]+48}" y="${n[2]+39}" text-anchor="middle" fill="#dde8de" font-family="JetBrains Mono" font-size="12">${n[0]}</text>
+        </g>
+      `).join('');
+      el('flow').innerHTML = `
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#5b6b5d"></path>
+          </marker>
+        </defs>
+        <text x="24" y="28" fill="#8a9a8c" font-family="JetBrains Mono" font-size="11">buyer-visible proof path</text>
+        ${paths}
+        ${rects}
+        <rect x="238" y="154" width="286" height="28" fill="rgba(154,255,94,.08)" stroke="#2a3a2e"/>
+        <text x="381" y="173" text-anchor="middle" fill="${color}" font-family="JetBrains Mono" font-size="12">result: ${overall || 'idle'}</text>
+      `;
+    }
+
+    async function copyBundle(){
+      if (!state.bundle) await runDemo();
+      const text = JSON.stringify(state.bundle, null, 2);
+      if (navigator.clipboard){
+        await navigator.clipboard.writeText(text);
+        el('copyBtn').textContent = 'copied';
+        setTimeout(() => el('copyBtn').textContent = 'copy bundle', 900);
+      }
+    }
+
+    async function downloadBundle(){
+      if (!state.bundle) await runDemo();
+      const text = JSON.stringify(state.bundle, null, 2);
+      const blob = new Blob([text], {type:'application/vnd.verifiable-intelligence.exchange+json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = state.bundle.quote.quote_id + '.viex.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function renderAllStatic(){
+      renderProviders();
+      renderModes();
+      renderFlow(state.bundle ? state.bundle.report.overall : 'idle');
+    }
+
+    el('runBtn').addEventListener('click', runDemo);
+    el('copyBtn').addEventListener('click', copyBundle);
+    el('downloadBtn').addEventListener('click', downloadBundle);
+    renderAllStatic();
+  </script>
+</body>
+</html>

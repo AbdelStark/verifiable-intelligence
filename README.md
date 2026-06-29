@@ -1,31 +1,50 @@
 # verifiable-intelligence
 
-A reference application demonstrating end-to-end verifiable LLM inference, built on the [CommitLLM](https://github.com/lambdaclass/CommitLLM) commit-and-audit protocol.
+Browser-first research demo for verifiable open-weight LLM inference markets, built on the [CommitLLM](https://github.com/lambdaclass/CommitLLM) commit-and-audit protocol.
 
 ## Status
 
-Pre-implementation. The product requirements are defined in [`PRD.md`](./PRD.md). The repository will be built out under that PRD, starting with a Rust CLI and TUI against Llama 3.2 1B Instruct W8A8 served from a Hugging Face Inference Endpoint.
+Scope pivot in progress. The original repository was specified as a Rust CLI plus TUI reference application. As of 2026-06-29, the v1 target is a buyer-facing proof marketplace demo: a consumer picks an inference provider, sends a prompt, receives an answer plus a CommitLLM-backed proof bundle, and verifies in the browser which model, prompt, decode policy, and delivered answer were bound.
+
+This is a research proof of concept. It is not a token resale service, not a payment product, and not a tool for unauthorized API-key resale or provider-term evasion.
 
 ## What v1 is
 
-`verifiable-intelligence` is **not** a new proof system. The protocol is CommitLLM, and the cryptographic engine lives upstream in the lambdaclass repository. This repository builds two developer-facing surfaces on top of that engine:
+`verifiable-intelligence` turns CommitLLM into a demo of a lawful, adversarial AI compute marketplace:
 
-1. **A Rust CLI (`vi`)** for use in scripts, CI, and integration. One-command verification of a CommitLLM receipt against a published verifier key, CPU-only on the user side.
-2. **A Rust TUI (`vi tui`)** for talks, screencasts, and onboarding. Live walk through verification phases with per-phase pass/fail indicators. A tampered receipt fails visibly.
+1. **Browser demo app**: provider catalog, quote, prompt, response, proof card, and verifier timeline in one page.
+2. **Proof bundle format**: a portable artifact containing the provider quote, CommitLLM receipt, verifier-key identity, prompt hash, delivered-answer hash, audit endpoint, and verification report.
+3. **Provider adapter path**: OpenAI-compatible chat surface extended with `X-Verifiable-Receipt: 1`, backed by a CommitLLM-instrumented open-weight model.
+4. **WASM verifier spike**: browser-side verification becomes v1 work because consumers should not need Rust tooling to inspect a proof.
 
-The provider side is a Docker image that runs the CommitLLM-instrumented vLLM stack and serves Llama 3.2 1B Instruct W8A8. The reference deployment is a Hugging Face Inference Endpoint as a custom container, deployed via the `hf` CLI. Self-hosted GPU is supported via `docker compose`. The image is vendor-neutral: no Modal-specific code in the critical path.
+The older Rust CLI remains useful for key generation, fixture validation, CI, and power users. The old TUI is no longer the primary demo surface.
 
 ## What v1 is not
 
-A WASM browser verifier (v1.1) and a batched compliance flow (v1.2) are explicitly post-v1 milestones. Both are scoped in section 12 of the PRD. Neither ships in v1.
+- No closed-weight model verification. CommitLLM requires public weights.
+- No Anthropic/OpenAI/Gemini attestation unless those providers publish compatible model commitments or signatures.
+- No real-money payment rail in v1. The demo can simulate credits or use test-mode payments only.
+- No unauthorized token resale, credential handling, or bypass of provider terms.
+- No new cryptography. The protocol engine remains CommitLLM.
+- No claim that verification proves factual correctness. It checks execution integrity for supported paths.
 
-The product cannot verify closed-weight models. The underlying protocol requires public weights, by design. This is not a regulatory product. The compliance flow (v1.2) is illustrative and has not been cleared by any regulator. This is not a production inference service. The provider endpoint is a demonstration deployment with sensible defaults, not a SaaS.
+## Try the demo prototype
 
-## Why CommitLLM and not ZKPs
+Open [`demo/index.html`](./demo/index.html) in a browser. It is a static prototype with simulated provider responses and proof objects. It is meant to make the buyer flow legible before the live CommitLLM backend lands.
 
-Zero-knowledge proofs of LLM inference are not yet practical at production scale. CommitLLM trades that off for an interactive commit-and-audit scheme that runs on real hardware today, at the cost of (a) open-weights only and (b) requiring the provider and the verifier to exchange an audit challenge. Those tradeoffs are real and are documented up front rather than buried.
+Browser smoke tests:
 
-For the full requirements, scope boundaries, and open questions, read [`PRD.md`](./PRD.md).
+```bash
+npm install
+npx playwright install chromium
+npm run test:demo
+```
+
+## Why CommitLLM
+
+CommitLLM returns a compact receipt and opens trace data only when challenged. On supported open-weight deployments, verifier work is CPU-side and provider serving stays on the normal GPU path. Its current boundary matters: model identity, prompt/request binding, decode policy, delivered answer, and many execution checks are covered; arbitrary-position attention output on stock GPU kernels remains a documented open problem upstream.
+
+For the current scope, read [`PRD.md`](./PRD.md), [`SPEC.md`](./SPEC.md), and [`docs/rfcs/RFC-0016-marketplace-demo-pivot.md`](./docs/rfcs/RFC-0016-marketplace-demo-pivot.md).
 
 ## License
 

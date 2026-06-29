@@ -9,6 +9,8 @@
 
 The project produces a reproducible measurement of the CommitLLM attention corridor on Llama 3.2 1B Instruct W8A8 across three workloads (short-answer factual, multi-turn reasoning, long-context code), all layers, on real GPU hardware. Metrics published: global `L_inf`, first-generated-token max, decode max, `frac_eq`, `frac<=1`, and growth-vs-context. The measurement script lives at `scripts/corridor/measure.py`; output is a JSON report committed to `reports/corridor/`. If our numbers fall outside CommitLLM's published 7B/8B envelope, we publish the gap honestly and either tighten the published tolerance or escalate upstream (PRD OQ-7 — we do both).
 
+**Pivot note, 2026-06-29:** after [RFC-0016](./RFC-0016-marketplace-demo-pivot.md), this is research backlog unless Llama 3.2 1B becomes the chosen live marketplace model. v1 should first prefer a CommitLLM-supported measured model.
+
 ## Motivation
 
 The corridor is the empirical bound at the center of CommitLLM's protocol. CommitLLM has published it for 7B/8B; nobody has published it for 1B. This project's only protocol-adjacent original contribution is exactly this measurement ([PRD G3, G8](../../PRD.md)). It must be reproducible by a third party; the numbers must be defensible by reference to a script in the repository.
