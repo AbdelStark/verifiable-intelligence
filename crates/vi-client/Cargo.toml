@@ -15,5 +15,8 @@ serde_json = "1"
 vi-errors = { path = "../vi-errors" }
 vi-receipt = { path = "../vi-receipt" }
 
+[dev-dependencies]
+mockito = "=1.7.2"
+
 [lints]
 workspace = true
