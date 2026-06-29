@@ -64,6 +64,17 @@ for (const file of [
 }
 
 assertIncludes('README.md', lock.commitllm_short, 'short CommitLLM SHA');
+assertIncludes('provider/Dockerfile', `COMMITLLM_SHORT=${lock.commitllm_short}`, 'provider short CommitLLM pin');
+assertIncludes(
+  'provider/entrypoint.sh',
+  `COMMITLLM_SHORT="\${COMMITLLM_SHORT:-${lock.commitllm_short}}"`,
+  'entrypoint short CommitLLM pin default'
+);
+assertIncludes(
+  'provider/healthz.py',
+  `os.environ.get("COMMITLLM_SHORT", "${lock.commitllm_short}")`,
+  'healthz short CommitLLM pin default'
+);
 
 const dockerfile = read('provider/Dockerfile');
 const dockerArgs = Object.fromEntries(
