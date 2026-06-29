@@ -22,7 +22,9 @@ tui = ["vi-cli/tui"]
 vi-cli = { path = "../vi-cli", default-features = false }
 
 [dev-dependencies]
+commitllm-keygen = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-keygen" }
 serde_json = "1"
+tempfile = "3"
 
 [lints]
 workspace = true

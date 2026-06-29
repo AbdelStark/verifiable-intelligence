@@ -51,3 +51,21 @@ fn endpoint_subcommand_help_lists_endpoint_flag() {
         assert!(stdout.contains("--endpoint <URL>"), "{subcommand}");
     }
 }
+
+#[test]
+fn keygen_help_lists_public_flags() {
+    let output = vi_command()
+        .args(["keygen", "--help"])
+        .output()
+        .expect("vi should run");
+
+    assert!(output.status.success());
+    let stdout = stdout_utf8(&output);
+    assert!(stdout.contains("--model <MODEL>"));
+    assert!(stdout.contains("--checkpoint <DIR>"));
+    assert!(stdout.contains("--output <PATH>"));
+    assert!(stdout.contains("--seed <U64>"));
+    assert!(stdout.contains("--force"));
+    assert!(stdout.contains("--expected-checkpoint-hash <SHA256>"));
+    assert!(stdout.contains("--allow-checkpoint-drift"));
+}

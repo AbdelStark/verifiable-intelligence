@@ -11,6 +11,7 @@
 use std::{
     ffi::OsString,
     io::{self, Write},
+    path::PathBuf,
     process,
     sync::Once,
 };
@@ -96,7 +97,53 @@ enum CliCommand {
 }
 
 #[derive(Debug, Args)]
-struct KeygenArgs {}
+struct KeygenArgs {
+    #[arg(
+        long,
+        value_name = "MODEL",
+        help = "Public model identifier to bind into the verifier key"
+    )]
+    model: String,
+
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Local checkpoint directory containing config, safetensors, and tokenizer files"
+    )]
+    checkpoint: PathBuf,
+
+    #[arg(
+        short = 'o',
+        long,
+        value_name = "PATH",
+        help = "Destination path for the generated VIKY verifier-key envelope"
+    )]
+    output: PathBuf,
+
+    #[arg(
+        long,
+        value_name = "U64",
+        default_value_t = 0,
+        help = "Deterministic key-generation seed"
+    )]
+    seed: u64,
+
+    #[arg(long, help = "Overwrite an existing output file")]
+    force: bool,
+
+    #[arg(
+        long,
+        value_name = "SHA256",
+        help = "Expected canonical checkpoint hash formatted as sha256:<hex>"
+    )]
+    expected_checkpoint_hash: Option<String>,
+
+    #[arg(
+        long,
+        help = "Warn instead of failing when --expected-checkpoint-hash mismatches"
+    )]
+    allow_checkpoint_drift: bool,
+}
 
 #[derive(Debug, Args)]
 struct ChatArgs {
@@ -238,10 +285,7 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
     let config = ResolvedConfig::from_env(&cli);
 
     match cli.command {
-        Some(CliCommand::Keygen(_)) => {
-            vi_keygen::placeholder();
-            stub_output("keygen", &config)
-        }
+        Some(CliCommand::Keygen(args)) => run_keygen(args, &config),
         Some(CliCommand::Chat(_)) => {
             vi_client::placeholder();
             stub_output("chat", &config)
@@ -284,19 +328,49 @@ fn run_tui_stub(config: &ResolvedConfig) -> Result<Output, ViError> {
     }
 }
 
+fn run_keygen(args: KeygenArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
+    let mut options = vi_keygen::KeygenOptions::new(args.model, args.checkpoint, args.output)
+        .with_seed(args.seed)
+        .with_force(args.force)
+        .with_allow_checkpoint_drift(args.allow_checkpoint_drift);
+    if let Some(expected_checkpoint_hash) = args.expected_checkpoint_hash {
+        options = options.with_expected_checkpoint_hash(expected_checkpoint_hash);
+    }
+
+    let report = vi_keygen::keygen_with_options(&options)?;
+    let mut value = serde_json::to_value(report).map_err(|error| ViError::Internal {
+        backtrace: format!("failed to serialize keygen output: {error}"),
+    })?;
+    let object = value.as_object_mut().ok_or_else(|| ViError::Internal {
+        backtrace: "keygen report did not serialize to an object".to_owned(),
+    })?;
+    object.insert("schema_version".to_owned(), serde_json::json!(1));
+    object.insert("subcommand".to_owned(), serde_json::json!("keygen"));
+
+    json_output(&value, config, "keygen")
+}
+
 fn stub_output(subcommand: &'static str, config: &ResolvedConfig) -> Result<Output, ViError> {
     let value = serde_json::json!({
         "schema_version": 1,
         "subcommand": subcommand,
         "status": "stub",
     });
+    json_output(&value, config, subcommand)
+}
+
+fn json_output(
+    value: &serde_json::Value,
+    config: &ResolvedConfig,
+    context: &'static str,
+) -> Result<Output, ViError> {
     let stdout = if config.pretty {
         serde_json::to_string_pretty(&value)
     } else {
         serde_json::to_string(&value)
     }
     .map_err(|error| ViError::Internal {
-        backtrace: format!("failed to serialize {subcommand} stub output: {error}"),
+        backtrace: format!("failed to serialize {context} output: {error}"),
     })?;
 
     Ok(Output {
@@ -484,7 +558,17 @@ mod tests {
             Some("https://flag.example")
         );
 
-        let keygen = Cli::try_parse_from(["vi", "keygen"]).expect("keygen parses");
+        let keygen = Cli::try_parse_from([
+            "vi",
+            "keygen",
+            "--model",
+            "model",
+            "--checkpoint",
+            "checkpoint",
+            "--output",
+            "key.viky",
+        ])
+        .expect("keygen parses");
         let keygen_config = ResolvedConfig::from_sources(
             &keygen,
             fake_env(&[(ENDPOINT_ENV, "https://env.example")]),
