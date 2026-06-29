@@ -10,6 +10,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+commitllm-verifier = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-verify" }
 vi-errors = { path = "../vi-errors" }
 vi-receipt = { path = "../vi-receipt" }
 

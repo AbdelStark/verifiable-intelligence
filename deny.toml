@@ -14,7 +14,9 @@ no-default-features = false
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "Pinned CommitLLM pre-rename dependency uses bincode 1.3.3; advisory is unmaintained-only with no safe upgrade; reevaluate on pin bump." },
+]
 
 [licenses]
 version = 2
@@ -35,6 +37,22 @@ allow = [
     "Zlib",
 ]
 
+[[licenses.clarify]]
+name = "verilm-core"
+version = "0.1.0"
+expression = "MIT"
+license-files = [
+    { path = "../../LICENSE", hash = 0x5731f966 },
+]
+
+[[licenses.clarify]]
+name = "verilm-verify"
+version = "0.1.0"
+expression = "MIT"
+license-files = [
+    { path = "../../LICENSE", hash = 0x5731f966 },
+]
+
 [bans]
 multiple-versions = "allow"
 wildcards = "deny"
@@ -47,4 +65,4 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = ["https://github.com/lambdaclass/CommitLLM.git"]
