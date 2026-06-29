@@ -31,6 +31,7 @@ The pivot moves the user-facing budget from CLI/TUI timing to browser demo and p
 
 | Operation | Target | Notes |
 |-----------|--------|-------|
+| Provider image size | < 8 GB | CI hard limit is 8 GiB (`8589934592` bytes) when `provider/` changes |
 | Quote creation | < 200 ms | Broker/local provider metadata only |
 | Chat response | model-dependent | Report p50/p95, do not gate v1 on model speed |
 | Routine verification | < 10 s in browser | Warm cache target |
