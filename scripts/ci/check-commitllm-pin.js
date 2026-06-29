@@ -32,6 +32,13 @@ function assertIncludes(file, expected, label = expected) {
   }
 }
 
+function assertMatches(file, pattern, label) {
+  const body = read(file);
+  if (!pattern.test(body)) {
+    throw new Error(`${file} missing ${label}`);
+  }
+}
+
 const lock = readLock();
 assertPresent(lock.commitllm, 'commitllm');
 assertPresent(lock.commitllm_short, 'commitllm_short');
@@ -57,5 +64,44 @@ for (const file of [
 }
 
 assertIncludes('README.md', lock.commitllm_short, 'short CommitLLM SHA');
+
+const dockerfile = read('provider/Dockerfile');
+const dockerArgs = Object.fromEntries(
+  Array.from(dockerfile.matchAll(/^ARG\s+([A-Z0-9_]+)=([^\s]+)$/gm)).map((match) => [
+    match[1],
+    match[2]
+  ])
+);
+const fromLines = dockerfile
+  .split(/\r?\n/)
+  .filter((line) => line.trim().toUpperCase().startsWith('FROM '));
+
+if (fromLines.length < 2) {
+  throw new Error('provider/Dockerfile must have builder and runtime FROM stages');
+}
+for (const line of fromLines) {
+  const resolved = line.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name) => dockerArgs[name] || '');
+  if (!/@sha256:[0-9a-f]{64}\b/.test(resolved)) {
+    throw new Error(`provider/Dockerfile FROM line is not digest pinned: ${line}`);
+  }
+}
+
+assertMatches(
+  'provider/Dockerfile',
+  new RegExp(`^ARG COMMITLLM_SHA=${fullSha}$`, 'm'),
+  'COMMITLLM_SHA build arg matching commitllm.lock'
+);
+assertMatches('provider/Dockerfile', /\bAS provider-builder\b/, 'provider-builder stage');
+assertMatches('provider/Dockerfile', /\bAS provider-runtime\b/, 'provider-runtime stage');
+assertMatches(
+  'provider/Dockerfile',
+  /pip wheel\s+\\\n\s+--no-deps\s+\\\n\s+--wheel-dir \/opt\/wheelhouse\s+\\\n\s+\/opt\/commitllm\/sidecar/m,
+  'CommitLLM sidecar wheel build'
+);
+assertIncludes(
+  'provider/Dockerfile',
+  'COPY --from=provider-builder /opt/wheelhouse /opt/wheelhouse',
+  'runtime wheelhouse copy'
+);
 
 console.log(`CommitLLM pin checks passed: ${lock.commitllm}`);
