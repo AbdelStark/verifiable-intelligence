@@ -16,6 +16,14 @@ Current hard gates:
 - Every routine `fixtures/viex/*.json` proof bundle stays under the routine
   `VIEX` budget.
 - The browser verifier WASM stays under the preferred v1 WASM budget.
+- `verifier/wasm/fixtures/v4_key_fullbridge.bin` stays under the CommitLLM
+  verifier-key budget. CI reports a 10 MiB target and fails above the 11 MiB
+  hard limit.
+
+The current checked-in CommitLLM full-bridge verifier-key fixture is 2,615 bytes
+as measured on 2026-06-29. The full `llama-3.2-1b-w8a8` key remains a measured
+artifact once a canonical fixture exists; the CI gate is deliberately wired to
+the reproducible fixture that exists in this repository today.
 
 ## CLI-Only Build Budget
 

@@ -126,6 +126,10 @@ for (const term of [
 assertIncludes(ciGuide, 'cargo build -p verifiable-intelligence --no-default-features --locked', 'ci guide no-default build');
 assertIncludes('docs/ci/performance.md', '--no-default-features', 'performance cli-only budget');
 assertIncludes('docs/spec/08-performance-budget.md', '--no-default-features', 'spec cli-only budget');
+assertIncludes('docs/ci/performance.md', 'v4_key_fullbridge.bin', 'performance key-size gate');
+assertIncludes('docs/ci/performance.md', '11 MiB', 'performance key-size hard limit');
+assertIncludes('docs/spec/08-performance-budget.md', 'CommitLLM verifier key fixture', 'spec key-size budget');
+assertIncludes('docs/spec/08-performance-budget.md', '11 MB', 'spec key-size hard limit');
 
 for (const term of ['Red Build Runbook', 'Local Reproduction Map', 'gh run view', 'npm run test:bundle']) {
   assertIncludes(redBuildGuide, term, `red-build guide ${term}`);
