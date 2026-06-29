@@ -40,7 +40,7 @@ fn subcommand_help_is_available_for_public_stubs() {
 
 #[test]
 fn endpoint_subcommand_help_lists_endpoint_flag() {
-    for subcommand in ["chat", "verify", "tui"] {
+    for subcommand in ["chat", "tui"] {
         let output = vi_command()
             .args([subcommand, "--help"])
             .output()
@@ -84,4 +84,19 @@ fn chat_help_lists_public_flags() {
     assert!(stdout.contains("--max-tokens <U32>"));
     assert!(stdout.contains("--receipt-out <PATH>"));
     assert!(stdout.contains("--no-receipt"));
+}
+
+#[test]
+fn verify_help_lists_public_flags() {
+    let output = vi_command()
+        .args(["verify", "--help"])
+        .output()
+        .expect("vi should run");
+
+    assert!(output.status.success());
+    let stdout = stdout_utf8(&output);
+    assert!(stdout.contains("--receipt <PATH>"));
+    assert!(stdout.contains("--key <PATH>"));
+    assert!(stdout.contains("--tier <TIER>"));
+    assert!(stdout.contains("--audit-endpoint <URL|file://PATH>"));
 }

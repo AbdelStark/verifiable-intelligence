@@ -21,6 +21,7 @@ tui = ["dep:vi-tui"]
 clap = { version = "=4.5.31", features = ["derive"] }
 ctrlc = "=3.4.5"
 serde_json = "1"
+sha2 = "0.10"
 vi-client = { path = "../vi-client" }
 vi-errors = { path = "../vi-errors" }
 vi-keygen = { path = "../vi-keygen" }

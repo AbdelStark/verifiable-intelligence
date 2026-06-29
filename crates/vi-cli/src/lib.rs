@@ -18,7 +18,9 @@ use std::{
 };
 
 use clap::{error::ErrorKind, Args, Parser, Subcommand};
+use sha2::{Digest, Sha256};
 use vi_errors::{ErrorEnvelope, IdentityFields, NetworkErrorKind, PhaseId, ViError};
+use vi_receipt::{AuditChallenge, AuditTier, ReceiptBindingHeader};
 
 const SUBCOMMAND: &str = "vi";
 const TEST_HOOKS_ENV: &str = "VI_ENABLE_TEST_HOOKS";
@@ -188,13 +190,30 @@ struct ChatArgs {
 
 #[derive(Debug, Args)]
 struct VerifyArgs {
+    #[arg(long, value_name = "PATH", help = "Path to the VIRC receipt envelope")]
+    receipt: PathBuf,
+
     #[arg(
-        short = 'e',
         long,
-        value_name = "URL",
-        help = "Provider or audit endpoint; defaults to VI_ENDPOINT"
+        value_name = "PATH",
+        help = "Path to the VIKY verifier-key envelope"
     )]
-    endpoint: Option<String>,
+    key: PathBuf,
+
+    #[arg(
+        long,
+        value_name = "TIER",
+        default_value = "routine",
+        help = "Verification tier: receipt-only, routine, deep, or full"
+    )]
+    tier: String,
+
+    #[arg(
+        long,
+        value_name = "URL|file://PATH",
+        help = "Provider audit endpoint for deep/full tiers; defaults to VI_ENDPOINT"
+    )]
+    audit_endpoint: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -317,10 +336,7 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
     match cli.command {
         Some(CliCommand::Keygen(args)) => run_keygen(args, &config),
         Some(CliCommand::Chat(args)) => run_chat(&args, &config),
-        Some(CliCommand::Verify(_)) => {
-            vi_verifier::placeholder();
-            stub_output("verify", &config)
-        }
+        Some(CliCommand::Verify(args)) => run_verify(&args, &config),
         Some(CliCommand::Tui(_)) => run_tui_stub(&config),
         Some(CliCommand::Panic) => {
             ensure_test_hooks_enabled()?;
@@ -438,6 +454,159 @@ fn run_chat(args: &ChatArgs, config: &ResolvedConfig) -> Result<Output, ViError>
     json_output(&value, config, "chat")
 }
 
+fn run_verify(args: &VerifyArgs, config: &ResolvedConfig) -> Result<Output, ViError> {
+    let tier = parse_audit_tier(&args.tier)?;
+    if tier_requires_audit(tier) && config.endpoint.is_none() {
+        return Err(missing_audit_endpoint(tier));
+    }
+
+    let receipt_bytes = read_input_file(&args.receipt, "--receipt")?;
+    let key_bytes = read_input_file(&args.key, "--key")?;
+    let mut audit_provider = build_verify_audit_provider(tier, config, &receipt_bytes)?;
+    let report = vi_verifier::verify(&receipt_bytes, &key_bytes, tier, &mut audit_provider)?;
+    let value = verify_report_json(&report);
+
+    json_output(&value, config, "verify")
+}
+
+fn parse_audit_tier(value: &str) -> Result<AuditTier, ViError> {
+    match value.to_ascii_lowercase().as_str() {
+        "receipt-only" | "receipt_only" | "receipt" => Ok(AuditTier::ReceiptOnly),
+        "routine" => Ok(AuditTier::Routine),
+        "deep" => Ok(AuditTier::Deep),
+        "full" => Ok(AuditTier::Full),
+        _ => Err(ViError::UnsupportedTier {
+            requested: value.to_owned(),
+            reason: "unknown audit tier; expected receipt-only, routine, deep, or full".to_owned(),
+        }),
+    }
+}
+
+fn tier_requires_audit(tier: AuditTier) -> bool {
+    matches!(tier, AuditTier::Deep | AuditTier::Full)
+}
+
+fn missing_audit_endpoint(tier: AuditTier) -> ViError {
+    ViError::UnsupportedTier {
+        requested: tier.as_str().to_owned(),
+        reason: "missing --audit-endpoint".to_owned(),
+    }
+}
+
+fn read_input_file(path: &Path, arg: &'static str) -> Result<Vec<u8>, ViError> {
+    fs::read(path).map_err(|error| ViError::Input {
+        arg: arg.to_owned(),
+        reason: format!("failed to read {}: {error}", path.display()),
+        detail: None,
+    })
+}
+
+fn build_verify_audit_provider(
+    tier: AuditTier,
+    config: &ResolvedConfig,
+    receipt_bytes: &[u8],
+) -> Result<VerifyAuditProvider, ViError> {
+    if !tier_requires_audit(tier) {
+        return Ok(VerifyAuditProvider::None);
+    }
+
+    let endpoint = config
+        .endpoint
+        .as_ref()
+        .ok_or_else(|| missing_audit_endpoint(tier))?;
+    if let Some(path) = endpoint.strip_prefix("file://") {
+        if path.is_empty() {
+            return Err(ViError::Input {
+                arg: "--audit-endpoint".to_owned(),
+                reason: "file:// audit endpoint must include a path".to_owned(),
+                detail: None,
+            });
+        }
+        return Ok(VerifyAuditProvider::File {
+            path: PathBuf::from(path),
+        });
+    }
+
+    Ok(VerifyAuditProvider::Http {
+        client: vi_client::ChatClient::new(endpoint, config.api_key.clone())?,
+        receipt_hash: sha256_hex(receipt_bytes),
+        trace_id: trace_id(),
+    })
+}
+
+#[derive(Debug)]
+enum VerifyAuditProvider {
+    None,
+    File {
+        path: PathBuf,
+    },
+    Http {
+        client: vi_client::ChatClient,
+        receipt_hash: String,
+        trace_id: String,
+    },
+}
+
+impl vi_verifier::AuditProvider for VerifyAuditProvider {
+    fn fetch_audit(
+        &mut self,
+        _receipt: &ReceiptBindingHeader,
+        tier: AuditTier,
+    ) -> Result<Vec<u8>, ViError> {
+        match self {
+            Self::None => Err(missing_audit_endpoint(tier)),
+            Self::File { path } => fs::read(&*path).map_err(|error| ViError::Input {
+                arg: "--audit-endpoint".to_owned(),
+                reason: format!("failed to read {}: {error}", path.display()),
+                detail: None,
+            }),
+            Self::Http {
+                client,
+                receipt_hash,
+                trace_id,
+            } => {
+                let challenge = AuditChallenge::new(tier, 0, vec![0, 1]);
+                let request = vi_client::AuditRequest::new(receipt_hash.clone(), challenge);
+                client
+                    .post_audit(trace_id, &request)
+                    .map(|response| response.body)
+            }
+        }
+    }
+}
+
+fn verify_report_json(report: &vi_verifier::VerifyReport) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "subcommand": "verify",
+        "tier": report.tier.as_str(),
+        "verdict": match report.verdict {
+            vi_verifier::VerifyVerdict::Pass => "pass",
+            vi_verifier::VerifyVerdict::Fail => "fail",
+        },
+        "phases": report
+            .phases
+            .iter()
+            .map(|phase| phase.as_str())
+            .collect::<Vec<_>>(),
+        "checks_run": report.checks_run,
+        "checks_passed": report.checks_passed,
+        "warnings": report.warnings,
+        "elapsed_ms": report.elapsed_ms,
+    })
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity("sha256:".len() + digest.len() * 2);
+    output.push_str("sha256:");
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
 fn chat_request_body(prompt: &str, max_tokens: u32) -> Result<String, ViError> {
     serde_json::to_string(&serde_json::json!({
         "messages": [
@@ -512,7 +681,7 @@ fn json_output(
 fn command_endpoint(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(CliCommand::Chat(args)) => args.endpoint.as_deref(),
-        Some(CliCommand::Verify(args)) => args.endpoint.as_deref(),
+        Some(CliCommand::Verify(args)) => args.audit_endpoint.as_deref(),
         Some(CliCommand::Tui(args)) => args.endpoint.as_deref(),
         Some(CliCommand::Keygen(_) | CliCommand::Panic | CliCommand::Error { .. }) | None => None,
     }
@@ -715,20 +884,45 @@ mod tests {
 
     #[test]
     fn log_precedence_is_flag_then_vi_log_then_rust_log() {
-        let env_only = Cli::try_parse_from(["vi", "verify"]).expect("verify parses");
+        let env_only = Cli::try_parse_from([
+            "vi",
+            "verify",
+            "--receipt",
+            "receipt.virc",
+            "--key",
+            "key.viky",
+        ])
+        .expect("verify parses");
         let env_only_config = ResolvedConfig::from_sources(
             &env_only,
             fake_env(&[(LOG_ENV, "vi=debug"), (RUST_LOG_ENV, "warn")]),
         );
         assert_eq!(env_only_config.log.as_deref(), Some("vi=debug"));
 
-        let rust_log_only = Cli::try_parse_from(["vi", "verify"]).expect("verify parses");
+        let rust_log_only = Cli::try_parse_from([
+            "vi",
+            "verify",
+            "--receipt",
+            "receipt.virc",
+            "--key",
+            "key.viky",
+        ])
+        .expect("verify parses");
         let rust_log_config =
             ResolvedConfig::from_sources(&rust_log_only, fake_env(&[(RUST_LOG_ENV, "warn")]));
         assert_eq!(rust_log_config.log.as_deref(), Some("warn"));
 
-        let flag = Cli::try_parse_from(["vi", "--log", "trace", "verify"])
-            .expect("verify with log parses");
+        let flag = Cli::try_parse_from([
+            "vi",
+            "--log",
+            "trace",
+            "verify",
+            "--receipt",
+            "receipt.virc",
+            "--key",
+            "key.viky",
+        ])
+        .expect("verify with log parses");
         let flag_config = ResolvedConfig::from_sources(&flag, fake_env(&[(LOG_ENV, "vi=debug")]));
         assert_eq!(flag_config.log.as_deref(), Some("trace"));
     }
