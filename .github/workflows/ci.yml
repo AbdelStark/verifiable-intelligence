@@ -115,6 +115,69 @@ jobs:
             test-results/
             playwright-report/
 
+  provider-image:
+    runs-on: ubuntu-latest
+    env:
+      EVENT_BEFORE: ${{ github.event.before }}
+      IMAGE_TAG: verifiable-intelligence-provider:ci
+      IMAGE_SIZE_LIMIT_BYTES: "8589934592"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changes
+        name: Detect provider changes
+        run: |
+          set -euo pipefail
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git fetch --no-tags --depth=1 origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+            changed="$(git diff --name-only "origin/${GITHUB_BASE_REF}"...HEAD -- provider/)"
+          elif [ -n "${EVENT_BEFORE:-}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            changed="$(git diff --name-only "${EVENT_BEFORE}" HEAD -- provider/)"
+          else
+            changed="$(git diff --name-only HEAD^ HEAD -- provider/ 2>/dev/null || true)"
+          fi
+
+          if [ -n "$changed" ]; then
+            printf 'Provider changes detected:\n%s\n' "$changed" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No provider/ changes detected; provider image smoke skipped." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build provider image
+        if: steps.changes.outputs.should_run == 'true'
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          docker build -f provider/Dockerfile -t "$IMAGE_TAG" . 2>&1 | tee reports/ci/provider-image-build.log
+      - name: Run CPU stub smoke
+        if: steps.changes.outputs.should_run == 'true'
+        run: |
+          set -o pipefail
+          docker run --rm \
+            -e VI_PROVIDER_STUB=1 \
+            -e VI_PROVIDER_STUB_EXIT_AFTER_READY=1 \
+            "$IMAGE_TAG" 2>&1 | tee reports/ci/provider-image-smoke.log
+      - name: Enforce image size budget
+        if: steps.changes.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          size_bytes="$(docker image inspect "$IMAGE_TAG" --format '{{.Size}}')"
+          {
+            echo "Provider image size: ${size_bytes} bytes"
+            echo "Provider image limit: ${IMAGE_SIZE_LIMIT_BYTES} bytes"
+          } | tee reports/ci/provider-image-size.log | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$size_bytes" -gt "$IMAGE_SIZE_LIMIT_BYTES" ]; then
+            echo "provider image exceeds size budget" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-provider-image-${{ github.run_id }}
+          path: reports/ci/
+
   supply-chain:
     runs-on: ubuntu-latest
     steps:
