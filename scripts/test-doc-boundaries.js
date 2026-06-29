@@ -123,6 +123,10 @@ for (const term of [
   assertIncludes(ciGuide, term, `ci guide ${term}`);
 }
 
+assertIncludes(ciGuide, 'cargo build -p verifiable-intelligence --no-default-features --locked', 'ci guide no-default build');
+assertIncludes('docs/ci/performance.md', '--no-default-features', 'performance cli-only budget');
+assertIncludes('docs/spec/08-performance-budget.md', '--no-default-features', 'spec cli-only budget');
+
 for (const term of ['Red Build Runbook', 'Local Reproduction Map', 'gh run view', 'npm run test:bundle']) {
   assertIncludes(redBuildGuide, term, `red-build guide ${term}`);
 }

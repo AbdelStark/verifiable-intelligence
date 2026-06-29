@@ -27,7 +27,7 @@ not a fix.
 |------------|---------------------|
 | `lint` | `scripts/ci/lints.sh` |
 | `workflow-lint` | `npm run test:workflows` |
-| `stable-test` | `cargo test --workspace --all-features --locked` and `npm run test:error-envelopes` |
+| `stable-test` | `cargo test --workspace --all-features --locked`, `cargo build -p verifiable-intelligence --no-default-features --locked`, and `npm run test:error-envelopes` |
 | `msrv-build` | `cargo +1.82.0 build --workspace --all-targets --locked` |
 | `proof-bundle` | `npm run test:bundle` |
 | `browser-demo` | `npm run test:demo` |

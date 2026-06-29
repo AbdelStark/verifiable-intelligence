@@ -17,6 +17,26 @@ Current hard gates:
   `VIEX` budget.
 - The browser verifier WASM stays under the preferred v1 WASM budget.
 
+## CLI-Only Build Budget
+
+The umbrella crate exposes a `tui` feature that defaults on. Disabling default
+features keeps the binary on the CLI utility path and excludes the optional
+`vi-tui` dependency:
+
+```bash
+cargo build -p verifiable-intelligence --no-default-features --release --locked
+```
+
+Current documented budget:
+
+| Artifact | Target | Current measurement |
+|----------|--------|---------------------|
+| `target/release/vi` built with `--no-default-features` | < 10 MB | 4,657,728 bytes on 2026-06-29 |
+
+The CI `stable-test` job runs a debug no-default build as a smoke. Release-size
+measurement is documented here rather than used as a v1 merge gate because the
+browser proof-market demo is the primary release surface.
+
 ## Nightly Browser Benchmark
 
 `nightly.yml` runs `npm run bench:browser` daily and on manual dispatch. The

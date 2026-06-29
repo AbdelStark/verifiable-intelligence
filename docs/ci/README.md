@@ -22,6 +22,7 @@ update this page in the same pull request.
 - `lint`: Rust formatting and clippy through `scripts/ci/lints.sh`.
 - `workflow-lint`: `npm run test:workflows` and actionlint.
 - `stable-test`: `cargo test --workspace --all-features --locked` plus
+  `cargo build -p verifiable-intelligence --no-default-features --locked` and
   `npm run test:error-envelopes`.
 - `msrv-build`: workspace build on Rust `1.82.0`.
 - `proof-bundle`: `npm run test:bundle`.

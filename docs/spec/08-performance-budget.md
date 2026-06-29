@@ -20,6 +20,12 @@ The pivot moves the user-facing budget from CLI/TUI timing to browser demo and p
 | Deep audit bundle | measured | May exceed routine target |
 | Browser verifier WASM | < 10 MB preferred | Spike may revise |
 
+## CLI utility budgets
+
+| Artifact | Target | Notes |
+|----------|--------|-------|
+| `vi` release binary with `--no-default-features` | < 10 MB | CLI-only utility build; measured at 4,657,728 bytes on 2026-06-29 |
+
 ## Live provider budgets
 
 | Operation | Target | Notes |

@@ -66,6 +66,10 @@ jobs:
           mkdir -p reports/ci
           set -o pipefail
           cargo test --workspace --all-features --locked 2>&1 | tee reports/ci/cargo-test.log
+      - name: CLI-only no-default build
+        run: |
+          set -o pipefail
+          cargo build -p verifiable-intelligence --no-default-features --locked 2>&1 | tee reports/ci/cli-only-build.log
       - name: Error envelope schema
         run: |
           set -o pipefail
