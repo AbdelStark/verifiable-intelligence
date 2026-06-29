@@ -1,107 +1,54 @@
-# 05 — Observability
+# 05 - Observability
 
-The CLI and TUI emit structured logs and timing data. The provider container emits standard vLLM logs plus a small set of CommitLLM-specific events. This document defines the log schema, the events the project owns, redaction rules, and the user-facing controls. Implementation detail in [RFC-0015](../rfcs/RFC-0015-observability-schema.md).
+The pivot adds browser, broker, and proof-bundle events to the original provider and verifier logs. Logs are for debugging and reproducibility. They are not proof material.
 
-## Goals
+## Principles
 
-- A user can reproduce a verification failure by reading logs alone.
-- An operator of the provider can correlate a client-side `trace_id` with a server-side request.
-- Sensitive content (prompts, generated text, key bytes) never appears in logs by default.
-- Logs are machine-parseable JSON; humans use `--pretty` or a `jq` filter.
+- Raw prompts and raw answers are not logged by default.
+- Prompt hashes, answer hashes, quote IDs, request IDs, key hashes, and receipt hashes are allowed.
+- Browser demo telemetry is local-only unless a hosted demo explicitly adds analytics.
+- Broker logs must be enough to correlate a quote, provider request, receipt, and verification report.
 
-## Non-goals
+## Event namespaces
 
-- No tracing backend integration in v1 (no OTLP exporter, no Jaeger, no Tempo).
-- No metrics endpoint on the client. The provider exposes vLLM's metrics as-is; we do not add to them.
-- No correlation across multiple `vi` invocations beyond what the user does themselves with `trace_id`.
+| Event | Emitter | Fields |
+|-------|---------|--------|
+| `demo.provider.selected` | browser | `provider_id`, `model_id`, `key_hash` |
+| `demo.quote.created` | browser/broker | `quote_id`, `provider_id`, `model_id`, `expires_unix_ms` |
+| `demo.prompt.submitted` | browser | `quote_id`, `prompt_hash`, `max_tokens` |
+| `demo.response.received` | browser/broker | `request_id`, `answer_hash`, `receipt_hash`, `elapsed_ms` |
+| `demo.verify.started` | browser/verifier | `bundle_hash`, `tier`, `verification_mode` |
+| `demo.verify.check` | browser/verifier | `check_id`, `class`, `status`, `elapsed_ms` |
+| `demo.verify.finished` | browser/verifier | `overall`, `elapsed_ms`, `warning_count` |
+| `broker.provider.forward` | broker | `quote_id`, `provider_id`, `request_id`, `trace_id` |
+| `provider.boot` | provider | `commitllm_pin`, `model_id`, `checkpoint_hash`, `key_hash` |
+| `provider.audit` | provider | `request_id`, `tier`, `token_index`, `layer_count`, `duration_ms` |
 
-## Client log model
+## Redaction
 
-The `tracing` crate is the implementation. Output format is JSON-per-line on stderr. The envelope:
-
-```json
-{
-  "ts": "2026-05-12T10:15:42.123Z",
-  "level": "INFO",
-  "trace_id": "01J...",
-  "subcommand": "verify",
-  "event": "phase.started",
-  "fields": { "phase": "bridge_replay" }
-}
-```
-
-- `ts`: ISO-8601 UTC with millisecond precision.
-- `level`: `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`.
-- `trace_id`: ULID, set once at process start, carried in the error envelope.
-- `subcommand`: one of `keygen`, `chat`, `verify`, `tui`.
-- `event`: dotted-namespace event name, stable.
-- `fields`: event-specific structured fields. Schema per event.
-
-## Default verbosity
-
-- Default: silent on stderr unless an error occurs.
-- `--log` flag or `RUST_LOG=verifiable_intelligence=info`: INFO and above.
-- `RUST_LOG=verifiable_intelligence=debug`: full phase-boundary trace.
-- `RUST_LOG=verifiable_intelligence=trace`: byte-level decode diagnostics.
-
-`--log` and `RUST_LOG` together: the most verbose wins.
-
-## Events the project owns
-
-| Event | Level | When | Fields |
-|-------|-------|------|--------|
-| `process.start` | INFO | First action of every process | `trace_id`, `subcommand`, `version`, `args` (redacted) |
-| `process.end` | INFO | Last action; emitted from a drop guard | `trace_id`, `exit_code`, `duration_ms` |
-| `keygen.fetch.start` | INFO | Begin downloading checkpoint | `model_id`, `source` |
-| `keygen.fetch.end` | INFO | Finish download | `bytes`, `duration_ms` |
-| `keygen.hash` | DEBUG | Compute checkpoint hash | `checkpoint_hash` |
-| `keygen.emit` | INFO | Write key | `key_path`, `key_size_bytes`, `key_hash` |
-| `chat.request` | INFO | Send chat request | `endpoint`, `model_id`, `max_tokens`, `prompt_hash` (always; never the prompt) |
-| `chat.response` | INFO | Response received | `http_status`, `text_chars`, `receipt_size_bytes`, `duration_ms` |
-| `verify.start` | INFO | Begin verification | `tier`, `receipt_path`, `key_path` |
-| `verify.phase.start` | DEBUG | Phase begins | `phase` |
-| `verify.phase.end` | DEBUG | Phase ends | `phase`, `passed`, `measured?`, `tolerance?`, `duration_ms` |
-| `verify.end` | INFO | Verification complete | `overall`, `phases_passed`, `phases_failed`, `duration_ms` |
-| `audit.request` | INFO | Request audit payload | `endpoint`, `tier`, `token_index`, `layer_count` |
-| `audit.response` | INFO | Audit payload received | `bytes`, `duration_ms` |
-| `tui.tamper.applied` | INFO | TUI applied a tamper | `kind`, `offset?` |
-| `error` | ERROR | Any error reaching the boundary | `category`, `detail` |
-
-Event names are stable. Adding events is non-breaking. Renaming or removing is breaking.
-
-## Redaction rules
-
-- **Never logged at default verbosity:** prompt text, generated text, key bytes, receipt bytes, audit payload bytes, raw HTTP headers other than the receipt opt-in marker.
-- **Always logged:** prompt hash, response character count, byte counts, durations, phase identifiers.
-- **DEBUG and TRACE may log additional fields**, but never raw key material or full prompts. `TRACE` may log the first 32 bytes of a receipt as a hex prefix for offset analysis; never more.
-
-The redaction layer is implemented as a `tracing` subscriber middleware so that bypassing it requires touching the subscriber, not an `info!` call site. Unit-tested per [07-testing-strategy.md](./07-testing-strategy.md).
-
-## Provider-side observability
-
-The provider container emits two log streams:
-
-1. **vLLM stdout/stderr** — verbatim from upstream. Not normalized.
-2. **CommitLLM events** — the upstream prover emits its own events at known levels. We do not wrap or reformat.
-
-The provider entrypoint adds three CommitLLM-adjacent log lines:
-
-- `provider.boot` with `commitllm_pin`, `model_id`, `checkpoint_hash`.
-- `provider.ready` once `/healthz` is green.
-- `provider.audit` once per audit request: `request_id`, `tier`, `token_index`, `layer_count`, `duration_ms`.
-
-These are sufficient to correlate a client trace with a server log.
+| Field | Default | Debug |
+|-------|---------|-------|
+| `prompt` | dropped | dropped |
+| `answer` | dropped | dropped |
+| `prompt_hash` | kept | kept |
+| `answer_hash` | kept | kept |
+| `api_key` | dropped | dropped |
+| `receipt_bytes` | dropped | prefix only |
+| `bundle_json` | dropped | local-only test fixtures |
 
 ## Trace correlation
 
-The `vi` CLI sends `X-Verifiable-Intelligence-Trace: <trace_id>` on chat and audit requests. The provider entrypoint echoes it in `provider.audit` log lines and (when available) in `/v1/audit` response headers. Optional; not required for protocol correctness; not used as a security signal.
+The browser creates a `trace_id` per verification run. Broker and provider propagate it with `X-Verifiable-Intelligence-Trace`. The trace ID is not a security signal; it only helps connect logs.
 
-## Performance impact
+## Metrics
 
-- Default-silent emission cost is dominated by error-path allocation; benchmarks show negligible overhead on hot paths.
-- `INFO` level on a verify run costs less than 1 ms total on a 2023-class CPU (measured per NFR-1).
-- `TRACE` is not budgeted for; it's a debugging mode.
+Minimum local metrics:
 
-## Auditability
+- static demo render time,
+- quote-to-response elapsed time,
+- verification elapsed time,
+- proof bundle byte size,
+- receipt byte size,
+- first failing check ID.
 
-Logs are a debugging tool, not a security primitive. A failed verification's authoritative output is the error envelope on stderr and the JSON report on stdout; logs add context but do not change the outcome.
+Hosted demo metrics must not include raw prompt or answer text.

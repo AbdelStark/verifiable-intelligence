@@ -9,6 +9,8 @@
 
 The provider is a single Docker image built from one Dockerfile. It contains vLLM with the CommitLLM patches applied at the pinned commit, Llama 3.2 1B Instruct W8A8 weights pre-baked into the image (small enough at ~1.5 GB to fit), and a thin entrypoint that boots vLLM, exposes the OpenAI-compatible chat endpoint, the audit endpoint, and `/healthz`. The image targets a single GPU with at least 16 GB VRAM. No Modal-specific code is in the critical path; the image is portable across HF Inference Endpoints, self-hosted `docker compose`, and (best-effort) other targets.
 
+**Pivot note, 2026-06-29:** after [RFC-0016](./RFC-0016-marketplace-demo-pivot.md), the provider-image pattern remains valid, but the baked model should follow the selected CommitLLM-supported marketplace reference model.
+
 ## Motivation
 
 Two friction points the project must remove for the integrating developer and for the demo presenter:

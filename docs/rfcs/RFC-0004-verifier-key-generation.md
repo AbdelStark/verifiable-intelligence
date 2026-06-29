@@ -9,6 +9,8 @@
 
 `vi keygen` is a single, deterministic command that fetches (or accepts) a model checkpoint, hashes it canonically, runs the CommitLLM key-generation routine at the pinned commit, and emits a `VIKY` envelope binding the resulting CommitLLM key to `(model_id, checkpoint_hash, commitllm_pin, seed)`. Two invocations with the same inputs produce byte-identical output. The key is public verification material, not a secret.
 
+**Pivot note, 2026-06-29:** after [RFC-0016](./RFC-0016-marketplace-demo-pivot.md), key generation still matters, but the live model is reopened. Llama 3.2 1B-specific size targets are no longer v1 blockers unless that model is selected.
+
 ## Motivation
 
 The verifier needs material derived from the model's weights to check receipts. CommitLLM provides this; we provide the developer surface that turns "read a paper, run a benchmark script" into one command that yields a single binary file with a known size budget and a stable on-disk layout. The binding header lets the verifier refuse a mismatched receipt before any cryptographic work happens.

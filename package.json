@@ -1,0 +1,11 @@
+{
+  "name": "verifiable-intelligence-demo",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test:demo": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1"
+  }
+}

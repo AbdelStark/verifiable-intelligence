@@ -1,6 +1,6 @@
 # RFC-0008: TUI architecture
 
-- Status: Accepted
+- Status: Superseded for v1 by [RFC-0016](./RFC-0016-marketplace-demo-pivot.md)
 - Authors: AbdelStark
 - Created: 2026-05-12
 - Target milestone: v0.2
@@ -8,6 +8,8 @@
 ## Summary
 
 The TUI is a `ratatui`-based terminal interface with three panes: prompt input (top), chat history (middle), verification panel (right). It drives the same `vi-client` and `vi-verifier` libraries the CLI does, surfacing the phase walk in real time. `--tamper byte-flip` deliberately corrupts the receipt before verification to produce a visible red failure for demonstrations. `--phase-delay <ms>` inserts deliberate per-phase delay so an audience can follow.
+
+**Pivot note, 2026-06-29:** this RFC is retained as a deferred terminal companion design. It no longer defines the v1 demo surface. The browser proof marketplace demo in RFC-0016 is the v1 path.
 
 ## Motivation
 

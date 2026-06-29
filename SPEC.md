@@ -1,29 +1,32 @@
 # verifiable-intelligence: Specification
 
-- Status: Draft
+- Status: Draft, pivoted
 - Authors: AbdelStark
 - Created: 2026-05-12
+- Updated: 2026-06-29
 - Source of intent: [`PRD.md`](./PRD.md)
 
-This document is the canonical entry point to the project specification corpus. It indexes the per-area specs in [`docs/spec/`](./docs/spec/) and the RFCs in [`docs/rfcs/`](./docs/rfcs/). The detail lives in those files. This page is short by design.
+This document is the canonical entry point to the project specification corpus. The v1 target changed on 2026-06-29 from a terminal-first developer reference app to a browser-first proof marketplace research demo.
 
 ## Thesis
 
-`verifiable-intelligence` is a reference application that turns the CommitLLM commit-and-audit protocol into a shippable developer experience. The protocol is not ours. The deployment recipe, the CLI surface, the TUI demonstration surface, the corridor measurement on a smaller-than-upstream-validated model, and the integration story are. v1 targets two end-user surfaces (Rust CLI, Rust TUI) on Llama 3.2 1B Instruct W8A8 served from a Hugging Face Inference Endpoint via a vendor-neutral Docker image.
+`verifiable-intelligence` makes model-substitution risk legible to a consumer buying inference from an untrusted but authorized open-weight provider. The consumer should see a quote, submit a prompt, receive an answer, and get a portable proof bundle that independently verifies the model identity, prompt binding, decode policy, and delivered answer under the CommitLLM protocol.
+
+The protocol is not ours. The contribution is the marketplace-shaped integration: provider catalog, proof bundle, browser verifier, demo broker API, and a consumer-readable verification report.
 
 ## Scope
 
-v1 (this corpus) ships:
+v1 ships:
 
-- A Rust CLI `vi` with subcommands `keygen`, `chat`, `verify`, `tui`.
-- A Rust TUI for interactive verification walkthroughs with tamper demonstration.
-- A provider-side Docker image running CommitLLM-instrumented vLLM on Llama 3.2 1B Instruct W8A8.
-- An HF Inference Endpoints deployment recipe and a self-hosted `docker compose` recipe.
-- A reproducible corridor measurement on Llama 3.2 1B Instruct W8A8 across three workloads.
-- An honest README and per-surface preamble naming the protocol's bounded properties.
-- A tamper-detection fuzz harness in CI on every PR.
+- A static browser demo app that shows the full buyer flow: provider selection, quote, prompt, generated answer, proof bundle, verification timeline, and tamper/model-swap failure cases.
+- A `VIEX` proof bundle format that packages the provider quote, CommitLLM receipt envelope, verifier-key identity, prompt and answer hashes, audit endpoint, and verification report.
+- A provider adapter contract for OpenAI-compatible chat with `X-Verifiable-Receipt: 1` and `POST /v1/audit`.
+- A WASM verifier spike and integration plan. Browser verification is now v1-critical.
+- A toy credit/quote flow for demo purposes. Real money is out of scope unless handled by a test-mode payment provider.
+- A lawful-use boundary: no stolen credentials, no unauthorized token resale, no bypass of upstream provider terms.
+- CI fixtures that prove the demo rejects tampered receipts, swapped model identities, changed prompts, and rewritten answers.
 
-v1.1 (browser WASM verifier) and v1.2 (batched compliance flow) are scoped in [PRD §12](./PRD.md) and tracked as separate milestones. They do not block v1 release.
+The old Rust CLI/keygen/verifier crates remain implementation assets. The old Rust TUI and terminal-first release gates are superseded by [RFC-0016](./docs/rfcs/RFC-0016-marketplace-demo-pivot.md).
 
 ## Spec corpus
 
@@ -31,12 +34,12 @@ v1.1 (browser WASM verifier) and v1.2 (batched compliance flow) are scoped in [P
 |------|---------|
 | [`docs/spec/00-overview.md`](./docs/spec/00-overview.md) | Thesis, goals, non-goals, success criteria, scope boundaries |
 | [`docs/spec/01-architecture.md`](./docs/spec/01-architecture.md) | System architecture, components, data flow, module boundaries |
-| [`docs/spec/02-public-api.md`](./docs/spec/02-public-api.md) | Public CLI surface, HTTP API surface, versioning policy |
-| [`docs/spec/03-data-model.md`](./docs/spec/03-data-model.md) | Receipt, verifier key, audit payload, schema versioning |
+| [`docs/spec/02-public-api.md`](./docs/spec/02-public-api.md) | Browser app, broker API, provider API, CLI utility surface |
+| [`docs/spec/03-data-model.md`](./docs/spec/03-data-model.md) | Proof bundle, quote, receipt, verifier key, audit payload |
 | [`docs/spec/04-error-model.md`](./docs/spec/04-error-model.md) | Error taxonomy, exit codes, failure modes, recovery |
 | [`docs/spec/05-observability.md`](./docs/spec/05-observability.md) | Structured logging, metrics, tracing, redaction rules |
 | [`docs/spec/06-security.md`](./docs/spec/06-security.md) | Threat model, trust boundaries, secrets handling, abuse |
-| [`docs/spec/07-testing-strategy.md`](./docs/spec/07-testing-strategy.md) | Unit, property, integration, tamper fuzz, corridor, comprehension |
+| [`docs/spec/07-testing-strategy.md`](./docs/spec/07-testing-strategy.md) | Unit, property, integration, tamper fuzz, browser checks |
 | [`docs/spec/08-performance-budget.md`](./docs/spec/08-performance-budget.md) | Latency, size, memory targets; measurement methodology |
 | [`docs/spec/09-release-and-versioning.md`](./docs/spec/09-release-and-versioning.md) | Semver, deprecation policy, changelog discipline |
 | [`docs/spec/10-glossary.md`](./docs/spec/10-glossary.md) | Canonical terms |
@@ -45,51 +48,45 @@ v1.1 (browser WASM verifier) and v1.2 (batched compliance flow) are scoped in [P
 
 | RFC | Title | Status | Locks |
 |-----|-------|--------|-------|
-| [RFC-0001](./docs/rfcs/RFC-0001-workspace-and-crate-layout.md) | Workspace and crate layout | Accepted | Cargo workspace, crate boundaries, MSRV |
-| [RFC-0002](./docs/rfcs/RFC-0002-cli-surface.md) | `vi` CLI surface | Accepted | Subcommand shape, flags, JSON output schema |
-| [RFC-0003](./docs/rfcs/RFC-0003-receipt-format-pinning.md) | Receipt format pinning and version handling | Accepted | Pinned CommitLLM commit, receipt magic, version policy |
-| [RFC-0004](./docs/rfcs/RFC-0004-verifier-key-generation.md) | Verifier key generation and binding | Accepted | `vi keygen` contract, determinism, binding fields |
-| [RFC-0005](./docs/rfcs/RFC-0005-provider-image.md) | Provider Docker image architecture | Accepted | Image layout, entrypoint, env contract |
-| [RFC-0006](./docs/rfcs/RFC-0006-receipt-api-header.md) | Receipt API header convention | Accepted | `X-Verifiable-Receipt: 1` opt-in header (resolves PRD OQ-3) |
-| [RFC-0007](./docs/rfcs/RFC-0007-hf-deployment-recipe.md) | HF Inference Endpoints deployment recipe | Accepted | Deploy script, registry choice, fallback path |
-| [RFC-0008](./docs/rfcs/RFC-0008-tui-architecture.md) | TUI architecture | Accepted | Frame model, phase walk, tamper, delay |
-| [RFC-0009](./docs/rfcs/RFC-0009-tamper-fuzz-harness.md) | Tamper fuzz harness | Accepted | Per-PR 100-flip + nightly 1000-flip protocol |
-| [RFC-0010](./docs/rfcs/RFC-0010-corridor-measurement.md) | Corridor measurement methodology | Accepted | Workload set, layer coverage, report schema |
-| [RFC-0011](./docs/rfcs/RFC-0011-commitllm-upstream-pinning.md) | CommitLLM upstream pinning | Accepted | Pin policy, rename window plan (resolves PRD OQ-4) |
-| [RFC-0012](./docs/rfcs/RFC-0012-w8a8-quantization.md) | W8A8 quantization and checkpoint hosting | Accepted | `llm-compressor` recipe, mirror checkpoint (resolves PRD OQ-2 default) |
-| [RFC-0013](./docs/rfcs/RFC-0013-ci-pipeline.md) | CI pipeline and GPU-on-demand workflow | Accepted | CI matrix, GPU job gating, artifact retention |
-| [RFC-0014](./docs/rfcs/RFC-0014-error-taxonomy.md) | Error taxonomy and exit codes | Accepted | Error categories, exit code map, JSON shape |
-| [RFC-0015](./docs/rfcs/RFC-0015-observability-schema.md) | Observability schema | Accepted | Log event schema, span model, redaction rules |
+| [RFC-0001](./docs/rfcs/RFC-0001-workspace-and-crate-layout.md) | Workspace and crate layout | Partially superseded | Rust crates remain useful, but v1 adds browser app and broker |
+| [RFC-0002](./docs/rfcs/RFC-0002-cli-surface.md) | `vi` CLI surface | Partially superseded | CLI is utility, not v1 primary UX |
+| [RFC-0003](./docs/rfcs/RFC-0003-receipt-format-pinning.md) | Receipt format pinning and version handling | Accepted | Still valid inside proof bundle |
+| [RFC-0004](./docs/rfcs/RFC-0004-verifier-key-generation.md) | Verifier key generation and binding | Accepted | Still valid |
+| [RFC-0005](./docs/rfcs/RFC-0005-provider-image.md) | Provider Docker image architecture | Accepted | Still valid for provider adapters |
+| [RFC-0006](./docs/rfcs/RFC-0006-receipt-api-header.md) | Receipt API header convention | Accepted | Still valid |
+| [RFC-0007](./docs/rfcs/RFC-0007-hf-deployment-recipe.md) | HF Inference Endpoints deployment recipe | Partially superseded | Reference deploy may move to the easiest CommitLLM-supported GPU host |
+| [RFC-0008](./docs/rfcs/RFC-0008-tui-architecture.md) | TUI architecture | Superseded for v1 | Browser demo replaces TUI as the primary demo surface |
+| [RFC-0009](./docs/rfcs/RFC-0009-tamper-fuzz-harness.md) | Tamper fuzz harness | Accepted | Extended to proof bundles |
+| [RFC-0010](./docs/rfcs/RFC-0010-corridor-measurement.md) | Corridor measurement methodology | Partially superseded | v1 should prefer a CommitLLM-supported measured model before new 1B research |
+| [RFC-0011](./docs/rfcs/RFC-0011-commitllm-upstream-pinning.md) | CommitLLM upstream pinning | Accepted | Still valid |
+| [RFC-0012](./docs/rfcs/RFC-0012-w8a8-quantization.md) | W8A8 quantization and checkpoint hosting | Partially superseded | Model choice reopens under the marketplace pivot |
+| [RFC-0013](./docs/rfcs/RFC-0013-ci-pipeline.md) | CI pipeline and GPU-on-demand workflow | Partially superseded | Browser and bundle tests added |
+| [RFC-0014](./docs/rfcs/RFC-0014-error-taxonomy.md) | Error taxonomy and exit codes | Accepted | Still valid for CLI and verifier internals |
+| [RFC-0015](./docs/rfcs/RFC-0015-observability-schema.md) | Observability schema | Accepted | Extended to broker/provider correlation |
+| [RFC-0016](./docs/rfcs/RFC-0016-marketplace-demo-pivot.md) | Marketplace proof demo pivot | Accepted | Browser-first v1, proof bundle, lawful-use boundary |
 
 ## Open questions
 
-Carried from PRD and tracked as labelled issues. Each has an owner and a resolution trigger.
-
 | ID | Question | Default | Resolution trigger |
 |----|----------|---------|--------------------|
-| OQ-1 | Repository organization (personal vs `starkware-libs`) | personal | Before public release |
-| OQ-5 | HF custom-container limits acceptable? | self-hosted as reference, HF "may require tuning" | 1-week spike at build phase start |
-| OQ-6 | Public demo endpoint? | self-hosted-only at launch | 2 weeks before public release |
-| OQ-7 | Corridor escalation policy if numbers diverge | publish gap + contribute upstream | When corridor measurement returns |
-
-OQ-2, OQ-3, OQ-4 are resolved by RFCs (see index).
+| OQ-1 | Repository organization | personal repo | Before public release |
+| OQ-2 | Reference model | CommitLLM-supported Llama/Qwen W8A8 profile | Before provider integration starts |
+| OQ-3 | Browser verifier strategy | WASM wrapper over CommitLLM verifier if feasible; server-side verification fallback only for prototype | WASM spike |
+| OQ-4 | Public hosted demo | Static demo public, live GPU endpoint gated by cost | Before public release |
+| OQ-5 | Payment or credits | toy credits only | Before any hosted demo |
+| OQ-6 | Provider eligibility | authorized open-weight providers only | Before provider catalog launch |
 
 ## Decisions made under uncertainty
 
-These are spec-phase decisions made without further user input. They are reversible by superseding RFC.
-
-1. **`AbdelStark/verifiable-intelligence`** as the canonical home for v1. A move to an institutional org is a renaming exercise, not a re-spec.
-2. **Quantize ourselves and publish under `AbdelStark/Llama-3.2-1B-Instruct-quantized.w8a8`** as the default path. Adopted if upstream W8A8 becomes available.
-3. **`X-Verifiable-Receipt: 1` opt-in header** for receipt requests. Content negotiation rejected because vLLM's `Accept` handling is constrained; query-string rejected because it pollutes URL telemetry.
-4. **Pin to a pre-rename CommitLLM commit** and track the rename PR; do not vendor.
-5. **CI runs corridor measurement on demand, not on every PR.** GPU time is a budget.
-6. **CLI default output is JSON**; `--pretty` for human reading. Inverted from many CLIs because the integration use case is the primary one.
-7. **Receipt MIME identification by magic prefix**, not file extension. Files may be base64-text-wrapped on platforms that mangle binary; magic is authoritative.
+1. **Browser-first demo.** Consumers of a marketplace proof should not install Rust to understand a receipt.
+2. **No unauthorized resale support.** The motivating failure mode is model substitution in untrusted markets, but the project only supports authorized providers and open-weight models.
+3. **Proof bundle over raw receipt.** A buyer needs quote, model identity, prompt hash, answer hash, audit endpoint, and report in one portable artifact.
+4. **Prefer existing CommitLLM measured profiles.** The old Llama 3.2 1B W8A8 corridor work becomes research backlog, not the v1 blocker.
+5. **CLI remains, TUI defers.** CLI utilities help implementation and CI. The terminal TUI no longer carries the demo story.
 
 ## Residual risk
 
-Three items that the spec cannot eliminate and that v1 must accept or escalate:
-
-1. **Corridor numbers on 1B may fall outside CommitLLM's 7B/8B envelope.** RFC-0010 names this; PRD R1 names this. If `frac<=1 < 99.5%`, v1 ships with a tightened published tolerance and the gap is documented; if materially worse, v1 escalates to Llama 3.2 3B (PRD R1 fallback) and revises NFRs.
-2. **HF Inference Endpoints custom-container behavior is not fully knowable in advance.** RFC-0007 ships self-hosted as the always-supported reference path; HF is the preferred but not guaranteed deployment target.
-3. **CommitLLM rename window.** RFC-0011 pins pre-rename; a forced re-pin during v1 build is a small but real schedule risk.
+1. **CommitLLM is still in active development.** Pinning and fixtures are mandatory.
+2. **Browser verification may hit WASM or payload limits.** A server-side verifier can support the prototype, but v1 should prove the browser path or explicitly narrow the claim.
+3. **Proof language can be misread.** The UI must say what is verified and what remains open, especially attention coverage and closed-weight non-support.
+4. **Marketplace framing can be misused.** Docs and UI must prohibit unauthorized token resale and credential handling.

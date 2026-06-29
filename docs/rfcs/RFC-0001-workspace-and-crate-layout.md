@@ -9,6 +9,8 @@
 
 The repository is a single Cargo workspace with a deliberately split crate graph: one user-facing binary crate (`vi-cli`), one binary for the TUI (`vi-tui`), and a small set of leaf libraries with strict dependency direction. Leaf crates have no runtime, no networking, no async, and no Cargo features beyond what they intrinsically need. MSRV matches CommitLLM upstream's MSRV plus our additional dependencies; stable Rust only.
 
+**Pivot note, 2026-06-29:** this workspace remains useful for verifier, receipt, keygen, fixtures, and CI utilities. It no longer describes the whole v1 product, because [RFC-0016](./RFC-0016-marketplace-demo-pivot.md) adds a browser demo, proof bundle, and optional broker.
+
 ## Motivation
 
 The CLI and the TUI share the same protocol-level logic (key generation, receipt parsing, verification, networking) but differ in their UX layer. Without a workspace split, either: (a) the TUI link-depends on argument-parsing surface it never uses, or (b) the CLI link-depends on `ratatui` and the dependency tree explodes. Both inflate the binary, both slow incremental rebuilds, both make it harder to extract a library for downstream users in v1.x.
@@ -19,7 +21,7 @@ The CommitLLM crates are the protocol's home; we depend on them, we do not re-im
 
 - Distinct binary targets for CLI and TUI with shared library code.
 - Leaf crates (`vi-receipt`, `vi-errors`) with no async runtime and minimal dependency surface.
-- A `vi-verifier` crate that compiles to `wasm32-unknown-unknown` in v1.1 without modification.
+- A `vi-verifier` crate that compiles to `wasm32-unknown-unknown`; after RFC-0016 this is a v1 spike, not a v1.1 deferral.
 - Reproducible builds: `Cargo.lock` is checked in; MSRV is declared.
 - A path for downstream consumers to depend on `vi-verifier` or `vi-receipt` directly (post-v1 documentation task).
 
