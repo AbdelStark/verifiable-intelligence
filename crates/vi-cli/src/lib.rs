@@ -25,6 +25,8 @@ use vi_receipt::{AuditChallenge, AuditTier, ReceiptBindingHeader};
 
 const CLI_OUTPUT_SCHEMA_VERSION: u16 = 1;
 const SUBCOMMAND: &str = "vi";
+const PRETTY_JSON_COLOR: &str = "\x1b[36m";
+const ANSI_RESET: &str = "\x1b[0m";
 const TEST_HOOKS_ENV: &str = "VI_ENABLE_TEST_HOOKS";
 const ENDPOINT_ENV: &str = "VI_ENDPOINT";
 const API_KEY_ENV: &str = "VI_API_KEY";
@@ -770,17 +772,39 @@ fn json_output(
     context: &'static str,
 ) -> Result<Output, ViError> {
     let stdout = if config.pretty {
-        serde_json::to_string_pretty(&value)
+        let pretty = serialize_pretty_output(value, context)?;
+        if config.no_color {
+            pretty
+        } else {
+            color_pretty_output(&pretty)
+        }
     } else {
-        serde_json::to_string(&value)
-    }
-    .map_err(|error| ViError::Internal {
-        backtrace: format!("failed to serialize {context} output: {error}"),
-    })?;
+        serde_json::to_string(&value).map_err(|error| ViError::Internal {
+            backtrace: format!("failed to serialize {context} output: {error}"),
+        })?
+    };
 
     Ok(Output {
         stdout: Some(stdout),
     })
+}
+
+fn serialize_pretty_output(
+    value: &(impl Serialize + ?Sized),
+    context: &'static str,
+) -> Result<String, ViError> {
+    serde_json::to_string_pretty(value).map_err(|error| ViError::Internal {
+        backtrace: format!("failed to serialize {context} output: {error}"),
+    })
+}
+
+fn color_pretty_output(output: &str) -> String {
+    let mut colored =
+        String::with_capacity(PRETTY_JSON_COLOR.len() + output.len() + ANSI_RESET.len());
+    colored.push_str(PRETTY_JSON_COLOR);
+    colored.push_str(output);
+    colored.push_str(ANSI_RESET);
+    colored
 }
 
 fn command_endpoint(cli: &Cli) -> Option<&str> {
@@ -1053,8 +1077,8 @@ mod tests {
     }
 
     #[test]
-    fn success_output_shapes_match_snapshots() {
-        assert_output_snapshot(
+    fn pretty_success_output_shapes_match_snapshots() {
+        assert_pretty_output_snapshot(
             &KeygenOutput::new(vi_keygen::KeygenReport {
                 model_id: "toy-model".to_owned(),
                 checkpoint_hash: "sha256:checkpoint".to_owned(),
@@ -1070,7 +1094,7 @@ mod tests {
             include_str!("../tests/snapshots/output/keygen.json"),
         );
 
-        assert_output_snapshot(
+        assert_pretty_output_snapshot(
             &ChatOutput::new(
                 "https://provider.example/v1/chat/completions".to_owned(),
                 200,
@@ -1093,12 +1117,12 @@ mod tests {
             warnings: Vec::new(),
             elapsed_ms: 11,
         };
-        assert_output_snapshot(
+        assert_pretty_output_snapshot(
             &VerifyOutput::from_report(&verify_report),
             include_str!("../tests/snapshots/output/verify.json"),
         );
 
-        assert_output_snapshot(
+        assert_pretty_output_snapshot(
             &TuiOutput {
                 schema_version: CLI_OUTPUT_SCHEMA_VERSION,
                 subcommand: "tui",
@@ -1109,6 +1133,60 @@ mod tests {
             },
             include_str!("../tests/snapshots/output/tui.json"),
         );
+    }
+
+    #[test]
+    fn pretty_output_is_colored_by_default_and_strip_equivalent_to_no_color() {
+        let output = ChatOutput::new(
+            "https://provider.example/v1/chat/completions".to_owned(),
+            200,
+            "fixture answer".to_owned(),
+            Some(ChatReceiptOutput {
+                path: Path::new("answer.virc"),
+                size_bytes: 42,
+            }),
+            Vec::new(),
+        );
+
+        let colored = json_output(&output, &pretty_config(false), "chat")
+            .expect("colored output succeeds")
+            .stdout
+            .expect("stdout is present");
+        let plain = json_output(&output, &pretty_config(true), "chat")
+            .expect("plain output succeeds")
+            .stdout
+            .expect("stdout is present");
+
+        assert!(colored.starts_with(PRETTY_JSON_COLOR));
+        assert!(colored.ends_with(ANSI_RESET));
+        assert_eq!(strip_ansi(&colored), plain);
+        serde_json::from_str::<serde_json::Value>(&plain).expect("plain pretty output is JSON");
+        serde_json::from_str::<serde_json::Value>(&strip_ansi(&colored))
+            .expect("stripped colored output is JSON");
+    }
+
+    #[test]
+    fn compact_output_is_single_uncolored_json_object() {
+        let output = TuiOutput {
+            schema_version: CLI_OUTPUT_SCHEMA_VERSION,
+            subcommand: "tui",
+            status: "stub",
+            endpoint: Some("https://provider.example".to_owned()),
+            tamper: Some("byte-flip"),
+            phase_delay_ms: 250,
+        };
+
+        let stdout = json_output(&output, &ResolvedConfig::default(), "tui")
+            .expect("compact output succeeds")
+            .stdout
+            .expect("stdout is present");
+
+        assert!(!stdout.contains('\n'));
+        assert!(!stdout.contains('\x1b'));
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("compact output is JSON");
+        assert_eq!(value["schema_version"], CLI_OUTPUT_SCHEMA_VERSION);
+        assert_eq!(value["subcommand"], "tui");
     }
 
     #[cfg(not(feature = "tui"))]
@@ -1127,11 +1205,25 @@ mod tests {
         );
     }
 
-    fn assert_output_snapshot(value: &(impl Serialize + ?Sized), expected: &str) {
-        let mut actual =
-            serde_json::to_string_pretty(value).expect("output snapshot should serialize");
+    fn assert_pretty_output_snapshot(value: &(impl Serialize + ?Sized), expected: &str) {
+        let mut actual = json_output(value, &pretty_config(true), "snapshot")
+            .expect("pretty output should serialize")
+            .stdout
+            .expect("stdout is present");
         actual.push('\n');
         assert_eq!(actual, expected);
+    }
+
+    fn pretty_config(no_color: bool) -> ResolvedConfig {
+        ResolvedConfig {
+            pretty: true,
+            no_color,
+            ..ResolvedConfig::default()
+        }
+    }
+
+    fn strip_ansi(value: &str) -> String {
+        value.replace(PRETTY_JSON_COLOR, "").replace(ANSI_RESET, "")
     }
 
     fn fake_env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<OsString> + 'a {
