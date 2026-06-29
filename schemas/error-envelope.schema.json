@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verifiable-intelligence.local/schemas/error-envelope.schema.json",
+  "title": "vi error envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "error",
+    "schema_version",
+    "subcommand",
+    "category",
+    "exit_code",
+    "message",
+    "detail",
+    "remediation",
+    "trace_id"
+  ],
+  "properties": {
+    "error": {
+      "const": true
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "subcommand": {
+      "type": "string"
+    },
+    "category": {
+      "$ref": "#/$defs/category"
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "detail": {
+      "type": "object"
+    },
+    "remediation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "category": { "const": "verification_failed" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 1 },
+          "detail": { "$ref": "#/$defs/verification_failed_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "input" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 2 },
+          "detail": { "$ref": "#/$defs/input_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "network" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 3 },
+          "detail": { "$ref": "#/$defs/network_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "hash_mismatch" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 4 },
+          "detail": { "$ref": "#/$defs/hash_mismatch_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "receipt_missing" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 5 },
+          "detail": { "$ref": "#/$defs/receipt_missing_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "unknown_version" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 6 },
+          "detail": { "$ref": "#/$defs/unknown_version_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "identity_mismatch" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 7 },
+          "detail": { "$ref": "#/$defs/identity_mismatch_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "unsupported_tier" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 8 },
+          "detail": { "$ref": "#/$defs/unsupported_tier_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "corrupt_envelope" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 9 },
+          "detail": { "$ref": "#/$defs/corrupt_envelope_detail" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "internal" } } },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 70 },
+          "detail": { "$ref": "#/$defs/internal_detail" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "verification_failed",
+        "input",
+        "network",
+        "hash_mismatch",
+        "receipt_missing",
+        "unknown_version",
+        "identity_mismatch",
+        "unsupported_tier",
+        "corrupt_envelope",
+        "internal"
+      ]
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "embedding_merkle",
+        "shell_freivalds",
+        "bridge_replay",
+        "attention_corridor",
+        "kv_provenance",
+        "lm_head",
+        "decode_policy"
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "checkpoint_hash", "commitllm_pin"],
+      "properties": {
+        "model_id": { "type": "string", "minLength": 1 },
+        "checkpoint_hash": { "type": "string", "pattern": "^sha256:.+$" },
+        "commitllm_pin": { "type": "string", "minLength": 1 },
+        "key_hash": { "type": "string", "pattern": "^sha256:.+$" }
+      }
+    },
+    "verification_failed_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "measured", "tolerance", "extra"],
+      "properties": {
+        "phase": { "$ref": "#/$defs/phase" },
+        "measured": { "type": ["number", "null"] },
+        "tolerance": { "type": ["number", "null"] },
+        "extra": true
+      }
+    },
+    "input_detail": {
+      "type": "object",
+      "required": ["arg", "reason"],
+      "properties": {
+        "arg": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "network_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "kind", "http_status"],
+      "properties": {
+        "endpoint": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "dns",
+            "connection_refused",
+            "tls",
+            "tls_handshake_eof",
+            "timeout",
+            "http_status",
+            "other"
+          ]
+        },
+        "http_status": { "type": ["integer", "null"], "minimum": 100, "maximum": 599 }
+      }
+    },
+    "hash_mismatch_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected", "actual"],
+      "properties": {
+        "expected": { "type": "string", "pattern": "^sha256:.+$" },
+        "actual": { "type": "string", "pattern": "^sha256:.+$" }
+      }
+    },
+    "receipt_missing_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "content_type", "expected"],
+      "properties": {
+        "endpoint": { "type": "string", "minLength": 1 },
+        "content_type": { "type": "string", "minLength": 1 },
+        "expected": { "const": "multipart/mixed" }
+      }
+    },
+    "unknown_version_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelope", "field", "value", "supported"],
+      "properties": {
+        "envelope": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "value": { "type": "integer", "minimum": 0 },
+        "supported": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "identity_mismatch_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected", "actual"],
+      "properties": {
+        "expected": { "$ref": "#/$defs/identity" },
+        "actual": { "$ref": "#/$defs/identity" }
+      }
+    },
+    "unsupported_tier_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested_tier", "reason"],
+      "properties": {
+        "requested_tier": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "corrupt_envelope_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelope", "offset", "reason"],
+      "properties": {
+        "envelope": { "type": "string", "minLength": 1 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "internal_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backtrace"],
+      "properties": {
+        "backtrace": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

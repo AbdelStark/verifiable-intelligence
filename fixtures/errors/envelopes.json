@@ -1,0 +1,157 @@
+[
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "verification_failed",
+    "exit_code": 1,
+    "message": "verification phase bridge_replay failed",
+    "detail": {
+      "phase": "bridge_replay",
+      "measured": 47,
+      "tolerance": 10,
+      "extra": null
+    },
+    "remediation": "Re-fetch the receipt.",
+    "trace_id": "fixture-verification-failed"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "input",
+    "exit_code": 2,
+    "message": "invalid input for --receipt: file not found",
+    "detail": {
+      "arg": "--receipt",
+      "reason": "file not found",
+      "path": "./receipt.bin"
+    },
+    "remediation": "Check the argument value or file path.",
+    "trace_id": "fixture-input"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "network",
+    "exit_code": 3,
+    "message": "network error calling https://provider.example: timeout",
+    "detail": {
+      "endpoint": "https://provider.example",
+      "kind": "timeout",
+      "http_status": null
+    },
+    "remediation": "Check the endpoint URL and network connectivity.",
+    "trace_id": "fixture-network"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "hash_mismatch",
+    "exit_code": 4,
+    "message": "hash mismatch: expected sha256:expected, actual sha256:actual",
+    "detail": {
+      "expected": "sha256:expected",
+      "actual": "sha256:actual"
+    },
+    "remediation": "Re-download the checkpoint.",
+    "trace_id": "fixture-hash-mismatch"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "receipt_missing",
+    "exit_code": 5,
+    "message": "receipt missing",
+    "detail": {
+      "endpoint": "https://provider.example",
+      "content_type": "application/json",
+      "expected": "multipart/mixed"
+    },
+    "remediation": "Check provider receipt support.",
+    "trace_id": "fixture-receipt-missing"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "unknown_version",
+    "exit_code": 6,
+    "message": "unsupported VIRC ver version 9",
+    "detail": {
+      "envelope": "VIRC",
+      "field": "ver",
+      "value": 9,
+      "supported": [1]
+    },
+    "remediation": "Upgrade vi.",
+    "trace_id": "fixture-unknown-version"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "identity_mismatch",
+    "exit_code": 7,
+    "message": "identity mismatch",
+    "detail": {
+      "expected": {
+        "model_id": "model",
+        "checkpoint_hash": "sha256:abc",
+        "commitllm_pin": "25541e83"
+      },
+      "actual": {
+        "model_id": "other-model",
+        "checkpoint_hash": "sha256:def",
+        "commitllm_pin": "25541e83"
+      }
+    },
+    "remediation": "Use the matching verifier key.",
+    "trace_id": "fixture-identity-mismatch"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "unsupported_tier",
+    "exit_code": 8,
+    "message": "unsupported tier full",
+    "detail": {
+      "requested_tier": "full",
+      "reason": "missing --audit-endpoint"
+    },
+    "remediation": "Use a supported tier.",
+    "trace_id": "fixture-unsupported-tier"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "corrupt_envelope",
+    "exit_code": 9,
+    "message": "corrupt VIRC envelope at offset 7",
+    "detail": {
+      "envelope": "VIRC",
+      "offset": 7,
+      "reason": "binding_crc32 mismatch"
+    },
+    "remediation": "Re-fetch the original.",
+    "trace_id": "fixture-corrupt-envelope"
+  },
+  {
+    "error": true,
+    "schema_version": 1,
+    "subcommand": "vi",
+    "category": "internal",
+    "exit_code": 70,
+    "message": "internal error",
+    "detail": {
+      "backtrace": "panic at boundary"
+    },
+    "remediation": "Please file an issue with the trace_id.",
+    "trace_id": "fixture-internal"
+  }
+]
