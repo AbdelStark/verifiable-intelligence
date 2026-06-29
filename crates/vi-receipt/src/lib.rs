@@ -932,7 +932,8 @@ mod tests {
         encode_receipt_binding_header, encode_viau_payload, encode_viky_payload,
         encode_virc_payload, AuditBindingHeader, AuditChallenge, AuditTier, Envelope,
         KeyBindingHeader, Magic, ReceiptBindingHeader, AUDIT_SCHEMA_VERSION, ENVELOPE_FLAGS,
-        ENVELOPE_VERSION, HEADER_LEN, KEYGEN_SCHEMA_VERSION, RECEIPT_SCHEMA_VERSION,
+        ENVELOPE_VERSION, HEADER_LEN, KEYGEN_SCHEMA_VERSION, KEY_BINDING_PREFIX_LEN,
+        RECEIPT_SCHEMA_VERSION,
     };
     use proptest::prelude::{any, prop_oneof, Just, ProptestConfig};
     use proptest::string::string_regex;
@@ -1013,6 +1014,23 @@ mod tests {
 
             proptest::prop_assert_eq!(decoded, header);
             proptest::prop_assert_eq!(audit, audit_bytes.as_slice());
+        }
+
+        #[test]
+        fn mutated_valid_artifact_never_panics(
+            magic in magic_strategy(),
+            opaque_payload in collection::vec(any::<u8>(), 0..512),
+            mutation_index in any::<usize>(),
+            mutation_delta in any::<u8>(),
+        ) {
+            let mut bytes = valid_artifact_bytes(magic, &opaque_payload)?;
+            let index = mutation_index % bytes.len();
+            let delta = (mutation_delta % u8::MAX).saturating_add(1);
+            bytes[index] = bytes[index].wrapping_add(delta);
+
+            if let Err(error) = decode_artifact_and_binding(&bytes) {
+                proptest::prop_assert_ne!(error.category(), "internal");
+            }
         }
     }
 
@@ -1253,6 +1271,65 @@ mod tests {
     }
 
     #[test]
+    fn audit_binding_crc_mismatch_is_corrupt_envelope() {
+        let header = realistic_audit_header();
+        let mut encoded = encode_audit_binding_header(&header).expect("header should encode");
+        let last = encoded
+            .last_mut()
+            .expect("encoded header should not be empty");
+        *last ^= 0xff;
+
+        let error =
+            super::decode_audit_binding_header(&encoded).expect_err("CRC mismatch should fail");
+        assert_eq!(
+            error,
+            ViError::CorruptEnvelope {
+                envelope: "VIAU",
+                offset: 4,
+                reason: "binding_crc32 mismatch",
+            }
+        );
+    }
+
+    #[test]
+    fn binding_header_length_overrun_is_typed_for_all_kinds() {
+        let mut key = encode_key_binding_header(&realistic_key_header()).expect("key encodes");
+        force_binding_length_overrun(&mut key);
+        assert_eq!(
+            decode_key_binding_header(&key).expect_err("length overrun should fail"),
+            ViError::CorruptEnvelope {
+                envelope: "VIKY",
+                offset: KEY_BINDING_PREFIX_LEN,
+                reason: "binding header length overruns payload",
+            }
+        );
+
+        let mut receipt =
+            encode_receipt_binding_header(&realistic_receipt_header()).expect("receipt encodes");
+        force_binding_length_overrun(&mut receipt);
+        assert_eq!(
+            super::decode_receipt_binding_header(&receipt).expect_err("length overrun should fail"),
+            ViError::CorruptEnvelope {
+                envelope: "VIRC",
+                offset: KEY_BINDING_PREFIX_LEN,
+                reason: "binding header length overruns payload",
+            }
+        );
+
+        let mut audit =
+            encode_audit_binding_header(&realistic_audit_header()).expect("audit encodes");
+        force_binding_length_overrun(&mut audit);
+        assert_eq!(
+            super::decode_audit_binding_header(&audit).expect_err("length overrun should fail"),
+            ViError::CorruptEnvelope {
+                envelope: "VIAU",
+                offset: KEY_BINDING_PREFIX_LEN,
+                reason: "binding header length overruns payload",
+            }
+        );
+    }
+
+    #[test]
     fn receipt_binding_unknown_schema_version_is_unknown_version() {
         let header = ReceiptBindingHeader {
             receipt_schema_version: 2,
@@ -1365,5 +1442,37 @@ mod tests {
 
     fn realistic_audit_header() -> AuditBindingHeader {
         AuditBindingHeader::new("sha256:receipt", AuditTier::Deep, 12, vec![1, 7, 13])
+    }
+
+    fn valid_artifact_bytes(magic: Magic, opaque_payload: &[u8]) -> Result<Vec<u8>, ViError> {
+        let payload = match magic {
+            Magic::VIKY => encode_viky_payload(&realistic_key_header(), opaque_payload)?,
+            Magic::VIRC => encode_virc_payload(&realistic_receipt_header(), opaque_payload)?,
+            Magic::VIAU => encode_viau_payload(&realistic_audit_header(), opaque_payload)?,
+        };
+
+        Envelope::new(magic, payload).encode()
+    }
+
+    fn decode_artifact_and_binding(bytes: &[u8]) -> Result<(), ViError> {
+        let envelope = decode(bytes)?;
+        match envelope.magic {
+            Magic::VIKY => {
+                let _ = decode_viky_payload(&envelope.payload)?;
+            }
+            Magic::VIRC => {
+                let _ = decode_virc_payload(&envelope.payload)?;
+            }
+            Magic::VIAU => {
+                let _ = decode_viau_payload(&envelope.payload)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn force_binding_length_overrun(bytes: &mut [u8]) {
+        let body_len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        bytes[0..4].copy_from_slice(&body_len.saturating_add(1).to_le_bytes());
     }
 }
