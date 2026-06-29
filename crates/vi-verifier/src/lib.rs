@@ -5,7 +5,7 @@
 // Verification failures must flow through the shared `ViError` taxonomy.
 #![allow(clippy::result_large_err)]
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use commitllm_core::{
     serialize,
@@ -60,6 +60,8 @@ pub struct VerifyReport {
     pub checks_passed: usize,
     /// Non-fatal warnings.
     pub warnings: Vec<String>,
+    /// Milliseconds elapsed inside the upstream verifier.
+    pub elapsed_ms: u64,
 }
 
 /// Structured verifier phase event for logs, TUI, and browser demo consumers.
@@ -213,6 +215,10 @@ fn elapsed_millis(started_at: Instant) -> u64 {
     u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 fn decode_project_key(bytes: &[u8]) -> Result<(vi_receipt::KeyBindingHeader, Vec<u8>), ViError> {
     let envelope = Envelope::decode(bytes)?;
     if envelope.magic != Magic::VIKY {
@@ -320,6 +326,7 @@ fn report_from_upstream(
         checks_run: upstream.checks_run,
         checks_passed: upstream.checks_passed,
         warnings: upstream.skipped,
+        elapsed_ms: duration_millis(upstream.duration),
     })
 }
 
@@ -458,7 +465,8 @@ mod tests {
 
     use vi_errors::IdentityFields;
     use vi_receipt::{
-        encode_viky_payload, encode_virc_payload, KeyBindingHeader, ReceiptBindingHeader,
+        encode_viau_payload, encode_viky_payload, encode_virc_payload, AuditBindingHeader,
+        KeyBindingHeader, ReceiptBindingHeader,
     };
 
     use super::*;
@@ -566,6 +574,7 @@ mod tests {
             checks_run: VERIFY_PHASES.len(),
             checks_passed: VERIFY_PHASES.len(),
             warnings: Vec::new(),
+            elapsed_ms: 3,
         });
         let mut events = Vec::new();
 
@@ -576,6 +585,34 @@ mod tests {
             .flat_map(|phase| [("started", phase, None), ("ended", phase, Some(true))])
             .collect::<Vec<_>>();
         assert_eq!(event_markers(&events), expected);
+    }
+
+    #[test]
+    fn verify_report_json_is_byte_deterministic_modulo_elapsed_time() {
+        let (receipt, key, audit) = full_audit_fixture_artifacts();
+        let mut first_audit_provider = StaticAuditProvider::new(audit.clone());
+        let mut second_audit_provider = StaticAuditProvider::new(audit);
+
+        let first = verify(&receipt, &key, AuditTier::Full, &mut first_audit_provider)
+            .expect("full-tier fixture verifies");
+        let second = verify(&receipt, &key, AuditTier::Full, &mut second_audit_provider)
+            .expect("full-tier fixture verifies");
+
+        let mut first_json = verify_report_json(&first);
+        let mut second_json = verify_report_json(&second);
+        strip_timing_fields(&mut first_json);
+        strip_timing_fields(&mut second_json);
+
+        let first_bytes = serde_json::to_vec(&first_json).expect("report serializes");
+        let second_bytes = serde_json::to_vec(&second_json).expect("report serializes");
+
+        assert_eq!(first_bytes, second_bytes);
+        assert_eq!(
+            std::str::from_utf8(&first_bytes).expect("report JSON is UTF-8"),
+            "{\"checks_passed\":39,\"checks_run\":39,\"phases\":[\"embedding_merkle\",\"shell_freivalds\",\"bridge_replay\",\"attention_corridor\",\"kv_provenance\",\"lm_head\",\"decode_policy\"],\"tier\":\"full\",\"verdict\":\"pass\",\"warnings\":[]}"
+        );
+        assert_eq!(first_audit_provider.calls, 1);
+        assert_eq!(second_audit_provider.calls, 1);
     }
 
     #[test]
@@ -614,6 +651,29 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct StaticAuditProvider {
+        audit: Vec<u8>,
+        calls: usize,
+    }
+
+    impl StaticAuditProvider {
+        fn new(audit: Vec<u8>) -> Self {
+            Self { audit, calls: 0 }
+        }
+    }
+
+    impl AuditProvider for StaticAuditProvider {
+        fn fetch_audit(
+            &mut self,
+            _receipt: &ReceiptBindingHeader,
+            _tier: AuditTier,
+        ) -> Result<Vec<u8>, ViError> {
+            self.calls += 1;
+            Ok(self.audit.clone())
+        }
+    }
+
     fn project_key(model_id: &str) -> Vec<u8> {
         let header = KeyBindingHeader::new(model_id, "sha256:checkpoint", COMMITLLM_SHORT_PIN, 7);
         let payload = encode_viky_payload(&header, b"not-a-commitllm-key").expect("VIKY encodes");
@@ -639,6 +699,44 @@ mod tests {
             .expect("VIRC envelope encodes")
     }
 
+    fn full_audit_fixture_artifacts() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let raw_key = include_bytes!("../../../verifier/wasm/fixtures/v4_key_fullbridge.bin");
+        let raw_audit = include_bytes!("../../../verifier/wasm/fixtures/v4_audit_fullbridge.bin");
+        let model_id = "commitllm-fullbridge-fixture";
+        let checkpoint_hash = "sha256:fixture-checkpoint";
+
+        let key_header = KeyBindingHeader::new(model_id, checkpoint_hash, COMMITLLM_SHORT_PIN, 0);
+        let key_payload = encode_viky_payload(&key_header, raw_key).expect("fixture VIKY encodes");
+        let key = Envelope::new(Magic::VIKY, key_payload)
+            .encode()
+            .expect("fixture VIKY envelope encodes");
+
+        let receipt_header = ReceiptBindingHeader::new(
+            model_id,
+            checkpoint_hash,
+            COMMITLLM_SHORT_PIN,
+            sha256_hex(&key),
+            "sha256:fixture-prompt",
+            "sha256:fixture-answer",
+            1,
+        );
+        let receipt_payload = encode_virc_payload(&receipt_header, b"unused-full-audit-receipt")
+            .expect("fixture VIRC encodes");
+        let receipt = Envelope::new(Magic::VIRC, receipt_payload)
+            .encode()
+            .expect("fixture VIRC envelope encodes");
+
+        let audit_header =
+            AuditBindingHeader::new(sha256_hex(&receipt), AuditTier::Full, 0, vec![0, 1]);
+        let audit_payload =
+            encode_viau_payload(&audit_header, raw_audit).expect("fixture VIAU encodes");
+        let audit = Envelope::new(Magic::VIAU, audit_payload)
+            .encode()
+            .expect("fixture VIAU envelope encodes");
+
+        (receipt, key, audit)
+    }
+
     fn event_markers(events: &[PhaseEvent]) -> Vec<(&'static str, PhaseId, Option<bool>)> {
         events
             .iter()
@@ -647,5 +745,44 @@ mod tests {
                 PhaseEvent::Ended { phase, passed, .. } => ("ended", *phase, Some(*passed)),
             })
             .collect()
+    }
+
+    fn verify_report_json(report: &VerifyReport) -> serde_json::Value {
+        serde_json::json!({
+            "tier": report.tier.as_str(),
+            "verdict": match report.verdict {
+                VerifyVerdict::Pass => "pass",
+                VerifyVerdict::Fail => "fail",
+            },
+            "phases": report
+                .phases
+                .iter()
+                .map(|phase| phase.as_str())
+                .collect::<Vec<_>>(),
+            "checks_run": report.checks_run,
+            "checks_passed": report.checks_passed,
+            "warnings": report.warnings,
+            "elapsed_ms": report.elapsed_ms,
+        })
+    }
+
+    fn strip_timing_fields(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    strip_timing_fields(item);
+                }
+            }
+            serde_json::Value::Object(fields) => {
+                fields.remove("elapsed_ms");
+                for field in fields.values_mut() {
+                    strip_timing_fields(field);
+                }
+            }
+            serde_json::Value::Null
+            | serde_json::Value::Bool(_)
+            | serde_json::Value::Number(_)
+            | serde_json::Value::String(_) => {}
+        }
     }
 }
