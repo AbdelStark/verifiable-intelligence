@@ -1,0 +1,22 @@
+[package]
+name = "vi-commitllm-verifier"
+version = "0.1.0"
+edition = "2021"
+description = "Browser WASM wrapper for pinned CommitLLM routine verification fixtures"
+license = "MIT"
+repository = "https://github.com/AbdelStark/verifiable-intelligence"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+base64 = "0.22"
+getrandom = { version = "0.2", features = ["js"] }
+serde_json = "1"
+sha2 = "0.10"
+verilm-core = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-core" }
+verilm-verify = { path = "vendor/verilm-verify" }
+wasm-bindgen = "0.2"
+
+[patch.crates-io]
+zstd = { path = "zstd-compat" }

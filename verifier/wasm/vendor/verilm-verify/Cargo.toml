@@ -1,0 +1,12 @@
+[package]
+name = "verilm-verify"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+verilm-core = { git = "https://github.com/lambdaclass/CommitLLM.git", rev = "25541e83347655e44ad6e84eb901e1e7ae392a66", package = "verilm-core" }
+bincode = "1.3"
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+half = "2.7"

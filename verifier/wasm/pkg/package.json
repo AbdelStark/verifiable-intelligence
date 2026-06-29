@@ -1,0 +1,21 @@
+{
+  "name": "vi-commitllm-verifier",
+  "type": "module",
+  "description": "Browser WASM wrapper for pinned CommitLLM routine verification fixtures",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AbdelStark/verifiable-intelligence"
+  },
+  "files": [
+    "vi_commitllm_verifier_bg.wasm",
+    "vi_commitllm_verifier.js",
+    "vi_commitllm_verifier.d.ts"
+  ],
+  "main": "vi_commitllm_verifier.js",
+  "types": "vi_commitllm_verifier.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

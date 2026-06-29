@@ -1,0 +1,75 @@
+{
+  "magic": "VIEX",
+  "schema_version": 1,
+  "created_unix_ms": 1782738000000,
+  "quote": {
+    "quote_id": "qt_commitllm_wasm_fullbridge",
+    "provider_id": "commitllm-upstream-fixture",
+    "model_id": "commitllm-toy-fullbridge-fixture",
+    "checkpoint_hash": "sha256:ddcd5e5a50c01092c922da2eaa54a3824233c900fe2aeb48f821737bbc7d4aa8",
+    "commitllm_pin": "25541e83347655e44ad6e84eb901e1e7ae392a66",
+    "key_hash": "sha256:cb1b52be5f720c58671881ccca29d9650af5c17ec5aa0193f7d8be0ed748abde",
+    "decode_policy_hash": "sha256:141d96982cbcba1098421fbbe6651109c1a02d80b7bbb3e9446b87ffe5d53d4c",
+    "price": {
+      "currency": "USD",
+      "estimated": "0",
+      "per_1k_tokens": "0"
+    },
+    "expires_unix_ms": 1782738300000,
+    "signature": "demo:qt_commitllm_wasm_fullbridge"
+  },
+  "request": {
+    "request_id": "req_commitllm_wasm_fullbridge",
+    "prompt_hash": "sha256:282181809bb769e7ce8375240c3742d38ee77c85e68008eb8d8b08288b1f29b8",
+    "input_spec_hash": "sha256:f7ab88cf736eb30a95bc2004958f9dc12e947dbe738476bb5bd46961c3b819c0",
+    "max_tokens": 1
+  },
+  "response": {
+    "answer_hash": "sha256:0a9e107f89f4e12a48550765e0a8fa631d0425247144ad578b3caf1706e46cba",
+    "answer_preview": "CommitLLM upstream full-bridge fixture.",
+    "generated_token_count": 1,
+    "output_spec_hash": "sha256:f03c0486a14baf69397f3c3d3d203d79e6e61a98d888f26b0df621010cbf9be7"
+  },
+  "receipt": {
+    "encoding": "base64",
+    "content_type": "application/vnd.verifiable-intelligence.receipt+binary",
+    "bytes_b64": "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",
+    "sha256": "sha256:1542cff5d408914745d7dbcf7ddc43b45169930ab2a864bb4ffb6d845310d96a",
+    "size_bytes": 1501
+  },
+  "verifier": {
+    "key_hash": "sha256:cb1b52be5f720c58671881ccca29d9650af5c17ec5aa0193f7d8be0ed748abde",
+    "key_ref": "verifier/wasm/fixtures/v4_key_fullbridge.bin",
+    "commitllm_pin": "25541e83347655e44ad6e84eb901e1e7ae392a66",
+    "verifier_version": "vi-commitllm-verifier-0.1.0",
+    "verification_mode": "browser-wasm"
+  },
+  "audit": {
+    "audit_endpoint": "fixture://commitllm/fullbridge",
+    "tier": "full",
+    "challenge": {
+      "token_index": 0,
+      "layer_indices": [
+        0,
+        1
+      ]
+    },
+    "payload_hash": "sha256:1542cff5d408914745d7dbcf7ddc43b45169930ab2a864bb4ffb6d845310d96a"
+  },
+  "report": {
+    "overall": "not_run",
+    "checked_at_unix_ms": 1782738000000,
+    "checks": [
+      {
+        "id": "browser_wasm_pending",
+        "class": "structural",
+        "status": "not_run",
+        "detail": "browser harness invokes the pinned CommitLLM WASM verifier"
+      }
+    ],
+    "warnings": [
+      "upstream toy/fullbridge verifier fixture; not a live marketplace provider receipt"
+    ],
+    "unsupported": []
+  }
+}
