@@ -14,6 +14,7 @@ use reqwest::{
 };
 use serde_json::Value;
 use vi_errors::{NetworkErrorKind, ViError};
+use vi_receipt::AuditChallenge;
 
 /// Environment variable containing the provider bearer token.
 pub const API_KEY_ENV: &str = "VI_API_KEY";
@@ -26,6 +27,9 @@ pub const RECEIPT_HEADER: &str = "X-Verifiable-Receipt";
 
 /// Provider chat-completions path.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+
+/// Provider audit path.
+pub const AUDIT_PATH: &str = "/v1/audit";
 
 const RECEIPT_CONTENT_TYPE: &str = "application/vnd.verifiable-intelligence.receipt+binary";
 const MULTIPART_MIXED: &str = "multipart/mixed";
@@ -97,10 +101,53 @@ impl ChatClient {
         })
     }
 
+    /// POST a verifier audit challenge and return the raw `VIAU` envelope bytes.
+    pub fn post_audit(
+        &self,
+        trace_id: &str,
+        request: &AuditRequest,
+    ) -> Result<AuditResponse, ViError> {
+        let url = self.audit_url()?;
+        let response = self
+            .client
+            .post(url.clone())
+            .headers(self.audit_headers(trace_id)?)
+            .body(request.to_json_body())
+            .send()
+            .map_err(|error| network_error(url.as_str(), &error))?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+
+        if !status.is_success() {
+            return Err(http_status_error(url.as_str(), status.as_u16()));
+        }
+
+        let body = response
+            .bytes()
+            .map_err(|error| network_error(url.as_str(), &error))?
+            .to_vec();
+        Ok(AuditResponse {
+            status: status.as_u16(),
+            endpoint: url.to_string(),
+            content_type,
+            body,
+        })
+    }
+
     fn chat_url(&self) -> Result<Url, ViError> {
         self.endpoint
             .join(CHAT_COMPLETIONS_PATH)
             .map_err(|error| input_error("endpoint", format!("invalid chat path: {error}")))
+    }
+
+    fn audit_url(&self) -> Result<Url, ViError> {
+        self.endpoint
+            .join(AUDIT_PATH)
+            .map_err(|error| input_error("endpoint", format!("invalid audit path: {error}")))
     }
 
     fn chat_headers(&self, trace_id: &str) -> Result<HeaderMap, ViError> {
@@ -128,6 +175,72 @@ impl ChatClient {
 
         Ok(headers)
     }
+
+    fn audit_headers(&self, trace_id: &str) -> Result<HeaderMap, ViError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            TRACE_HEADER,
+            HeaderValue::from_str(trace_id).map_err(|error| {
+                input_error("trace_id", format!("invalid trace header value: {error}"))
+            })?,
+        );
+
+        if let Some(api_key) = &self.api_key {
+            let mut value =
+                HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|error| {
+                    input_error(
+                        "VI_API_KEY",
+                        format!("invalid authorization header: {error}"),
+                    )
+                })?;
+            value.set_sensitive(true);
+            headers.insert(AUTHORIZATION, value);
+        }
+
+        Ok(headers)
+    }
+
+    #[cfg(test)]
+    fn new_unchecked(endpoint: Url, api_key: Option<String>) -> Self {
+        Self {
+            endpoint,
+            api_key,
+            client: Client::new(),
+        }
+    }
+}
+
+/// JSON request body for `POST /v1/audit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditRequest {
+    /// Hash of the `VIRC` receipt being challenged.
+    pub receipt_hash: String,
+    /// Verifier-selected audit challenge.
+    pub challenge: AuditChallenge,
+}
+
+impl AuditRequest {
+    /// Construct an audit request from a receipt hash and verifier challenge.
+    #[must_use]
+    pub fn new(receipt_hash: impl Into<String>, challenge: AuditChallenge) -> Self {
+        Self {
+            receipt_hash: receipt_hash.into(),
+            challenge,
+        }
+    }
+
+    fn to_json_body(&self) -> String {
+        serde_json::json!({
+            "receipt_hash": &self.receipt_hash,
+            "tier": self.challenge.tier.as_str(),
+            "challenge": {
+                "token_index": self.challenge.token_index,
+                "layer_indices": &self.challenge.layer_indices,
+            },
+        })
+        .to_string()
+    }
 }
 
 /// Opaque response body for the later multipart parser.
@@ -142,6 +255,19 @@ pub struct ChatResponse {
     /// Degraded provider warning, when present.
     pub warning: Option<String>,
     /// Raw response bytes.
+    pub body: Vec<u8>,
+}
+
+/// Raw `POST /v1/audit` response containing a `VIAU` envelope body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditResponse {
+    /// HTTP status code.
+    pub status: u16,
+    /// Endpoint URL that produced this response.
+    pub endpoint: String,
+    /// Response content type, when present.
+    pub content_type: Option<String>,
+    /// Raw `VIAU` envelope bytes.
     pub body: Vec<u8>,
 }
 
@@ -383,6 +509,14 @@ fn network_error(endpoint: &str, error: &reqwest::Error) -> ViError {
     }
 }
 
+fn http_status_error(endpoint: &str, status: u16) -> ViError {
+    ViError::Network {
+        endpoint: endpoint.to_owned(),
+        kind: NetworkErrorKind::HttpStatus,
+        http_status: Some(status),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -391,13 +525,17 @@ mod tests {
         net::TcpListener,
         sync::Mutex,
         thread,
+        time::Duration,
     };
 
-    use reqwest::header::AUTHORIZATION;
+    use reqwest::{header::AUTHORIZATION, Url};
+    use serde_json::Value;
     use vi_errors::ViError;
+    use vi_receipt::{AuditChallenge, AuditTier};
 
     use super::{
-        parse_chat_response, ChatClient, ChatResponse, API_KEY_ENV, RECEIPT_HEADER, TRACE_HEADER,
+        parse_chat_response, AuditRequest, ChatClient, ChatResponse, API_KEY_ENV, RECEIPT_HEADER,
+        TRACE_HEADER,
     };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -457,6 +595,107 @@ mod tests {
         handle.join().expect("server joins");
 
         assert_eq!(error.category(), "network");
+    }
+
+    #[test]
+    fn audit_endpoint_round_trips_with_mock_server() {
+        let audit_body = b"VIAU\x01\x00audit-envelope".to_vec();
+        let (endpoint, server) = serve_http_once(
+            "HTTP/1.1 200 OK",
+            &[(
+                "Content-Type",
+                "application/vnd.verifiable-intelligence.audit+binary",
+            )],
+            audit_body.clone(),
+        );
+        let client = http_test_client(&endpoint, Some("secret-token".to_owned()));
+        let request = AuditRequest::new(
+            "sha256:receipt",
+            AuditChallenge::new(AuditTier::Deep, 12, vec![1, 7, 13]),
+        );
+
+        let response = client
+            .post_audit("trace-audit", &request)
+            .expect("audit request should succeed");
+        let captured = server.join().expect("server joins");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.endpoint, format!("{endpoint}/v1/audit"));
+        assert_eq!(
+            response.content_type.as_deref(),
+            Some("application/vnd.verifiable-intelligence.audit+binary")
+        );
+        assert_eq!(response.body, audit_body);
+        assert!(captured.starts_with("POST /v1/audit HTTP/1.1\r\n"));
+        assert!(captured.contains("x-verifiable-intelligence-trace: trace-audit\r\n"));
+        assert!(captured.contains("authorization: Bearer secret-token\r\n"));
+        assert_eq!(
+            request_json(&captured),
+            serde_json::json!({
+                "receipt_hash": "sha256:receipt",
+                "tier": "deep",
+                "challenge": {
+                    "token_index": 12,
+                    "layer_indices": [1, 7, 13],
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn audit_4xx_is_network_error_with_http_status() {
+        let (endpoint, server) = serve_http_once(
+            "HTTP/1.1 400 Bad Request",
+            &[("Content-Type", "application/json")],
+            br#"{"error":true}"#.to_vec(),
+        );
+        let client = http_test_client(&endpoint, None);
+        let request = AuditRequest::new(
+            "sha256:receipt",
+            AuditChallenge::new(AuditTier::Routine, 3, vec![0, 1]),
+        );
+
+        let error = client
+            .post_audit("trace-audit", &request)
+            .expect_err("4xx should fail");
+        server.join().expect("server joins");
+
+        assert_eq!(
+            error,
+            ViError::Network {
+                endpoint: format!("{endpoint}/v1/audit"),
+                kind: vi_errors::NetworkErrorKind::HttpStatus,
+                http_status: Some(400),
+            }
+        );
+    }
+
+    #[test]
+    fn audit_5xx_is_network_error_with_http_status() {
+        let (endpoint, server) = serve_http_once(
+            "HTTP/1.1 503 Service Unavailable",
+            &[("Content-Type", "application/json")],
+            br#"{"error":true}"#.to_vec(),
+        );
+        let client = http_test_client(&endpoint, None);
+        let request = AuditRequest::new(
+            "sha256:receipt",
+            AuditChallenge::new(AuditTier::Routine, 3, vec![0, 1]),
+        );
+
+        let error = client
+            .post_audit("trace-audit", &request)
+            .expect_err("5xx should fail");
+        server.join().expect("server joins");
+
+        assert_eq!(
+            error,
+            ViError::Network {
+                endpoint: format!("{endpoint}/v1/audit"),
+                kind: vi_errors::NetworkErrorKind::HttpStatus,
+                http_status: Some(503),
+            }
+        );
     }
 
     #[test]
@@ -568,5 +807,87 @@ mod tests {
             warning: None,
             body,
         }
+    }
+
+    fn http_test_client(endpoint: &str, api_key: Option<String>) -> ChatClient {
+        ChatClient::new_unchecked(Url::parse(endpoint).expect("test URL parses"), api_key)
+    }
+
+    fn serve_http_once(
+        status_line: &'static str,
+        headers: &'static [(&'static str, &'static str)],
+        body: Vec<u8>,
+    ) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let endpoint = format!("http://{}", listener.local_addr().expect("listener addr"));
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("connection accepted");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("read timeout set");
+            let request = read_http_request(&mut stream);
+
+            let mut response = format!("{status_line}\r\nContent-Length: {}\r\n", body.len());
+            for (name, value) in headers {
+                response.push_str(name);
+                response.push_str(": ");
+                response.push_str(value);
+                response.push_str("\r\n");
+            }
+            response.push_str("Connection: close\r\n\r\n");
+            stream
+                .write_all(response.as_bytes())
+                .expect("response headers written");
+            stream.write_all(&body).expect("response body written");
+            request
+        });
+        (endpoint, handle)
+    }
+
+    fn read_http_request(stream: &mut impl Read) -> String {
+        let mut buffer = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).expect("request bytes read");
+            assert!(read != 0, "connection closed before full request");
+            buffer.extend_from_slice(&chunk[..read]);
+
+            let Some(header_end) = find_header_end(&buffer) else {
+                continue;
+            };
+            let body_len = content_length(&buffer[..header_end]);
+            if buffer.len() >= header_end + 4 + body_len {
+                return String::from_utf8(buffer).expect("request is UTF-8");
+            }
+        }
+    }
+
+    fn find_header_end(bytes: &[u8]) -> Option<usize> {
+        bytes
+            .windows(b"\r\n\r\n".len())
+            .position(|window| window == b"\r\n\r\n")
+    }
+
+    fn content_length(headers: &[u8]) -> usize {
+        let headers = std::str::from_utf8(headers).expect("headers are UTF-8");
+        headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| {
+                    value
+                        .trim()
+                        .parse::<usize>()
+                        .expect("content length parses")
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    fn request_json(request: &str) -> Value {
+        let (_, body) = request
+            .split_once("\r\n\r\n")
+            .expect("request contains body separator");
+        serde_json::from_str(body).expect("request body is JSON")
     }
 }
