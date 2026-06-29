@@ -326,16 +326,19 @@ where
     let trace_id = trace_id();
 
     match Cli::try_parse_from(args) {
-        Ok(cli) => match run_cli(cli) {
-            Ok(output) => {
-                print_output(output);
-                0
+        Ok(cli) => {
+            let config = ResolvedConfig::from_env(&cli);
+            match init_logging(&cli, &trace_id).and_then(|()| run_cli(cli, &config)) {
+                Ok(output) => {
+                    print_output(output);
+                    0
+                }
+                Err(error) => {
+                    print_error_envelope(&error, &trace_id);
+                    error.exit_code()
+                }
             }
-            Err(error) => {
-                print_error_envelope(&error, &trace_id);
-                error.exit_code()
-            }
-        },
+        }
         Err(error) => {
             let exit_code = match error.kind() {
                 ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => 0,
@@ -349,14 +352,12 @@ where
     }
 }
 
-fn run_cli(cli: Cli) -> Result<Output, ViError> {
-    let config = ResolvedConfig::from_env(&cli);
-
+fn run_cli(cli: Cli, config: &ResolvedConfig) -> Result<Output, ViError> {
     match cli.command {
-        Some(CliCommand::Keygen(args)) => run_keygen(args, &config),
-        Some(CliCommand::Chat(args)) => run_chat(&args, &config),
-        Some(CliCommand::Verify(args)) => run_verify(&args, &config),
-        Some(CliCommand::Tui(args)) => run_tui(&args, &config),
+        Some(CliCommand::Keygen(args)) => run_keygen(args, config),
+        Some(CliCommand::Chat(args)) => run_chat(&args, config),
+        Some(CliCommand::Verify(args)) => run_verify(&args, config),
+        Some(CliCommand::Tui(args)) => run_tui(&args, config),
         Some(CliCommand::Panic) => {
             ensure_test_hooks_enabled()?;
             panic!("deliberate vi panic test hook");
@@ -370,6 +371,28 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
             }))
         }
         None => run(),
+    }
+}
+
+fn init_logging(cli: &Cli, trace_id: &str) -> Result<(), ViError> {
+    vi_log::init_with_filter(cli_subcommand_name(cli), trace_id, cli.log.as_deref()).map_err(
+        |error| ViError::Input {
+            arg: error.source_name().to_owned(),
+            reason: error.to_string(),
+            detail: None,
+        },
+    )
+}
+
+fn cli_subcommand_name(cli: &Cli) -> &'static str {
+    match &cli.command {
+        Some(CliCommand::Keygen(_)) => "keygen",
+        Some(CliCommand::Chat(_)) => "chat",
+        Some(CliCommand::Verify(_)) => "verify",
+        Some(CliCommand::Tui(_)) => "tui",
+        Some(CliCommand::Panic) => "__panic",
+        Some(CliCommand::Error { .. }) => "__error",
+        None => SUBCOMMAND,
     }
 }
 
@@ -898,7 +921,10 @@ fn print_error_envelope(error: &ViError, trace_id: &str) {
 }
 
 fn trace_id() -> String {
-    std::env::var(TRACE_ID_ENV).unwrap_or_else(|_| format!("vi-{}", process::id()))
+    std::env::var(TRACE_ID_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(vi_log::generate_trace_id)
 }
 
 fn ensure_test_hooks_enabled() -> Result<(), ViError> {
@@ -1194,7 +1220,8 @@ mod tests {
     fn tui_without_feature_returns_unsupported_tier() {
         let cli = Cli::try_parse_from(["vi", "tui"]).expect("tui parses");
 
-        let error = run_cli(cli).expect_err("tui should fail without the feature");
+        let error = run_cli(cli, &ResolvedConfig::default())
+            .expect_err("tui should fail without the feature");
 
         assert_eq!(
             error,
