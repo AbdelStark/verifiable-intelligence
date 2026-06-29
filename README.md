@@ -43,7 +43,7 @@ npm run test:demo
 Proof bundle fixture validation:
 
 ```bash
-npm run test:schema
+npm run test:bundle
 ```
 
 ## Why CommitLLM

@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "scripts": {
     "test:demo": "playwright test",
-    "test:schema": "node scripts/validate-viex-fixtures.js"
+    "test:schema": "node scripts/validate-viex-fixtures.js",
+    "test:tamper": "node scripts/test-viex-tamper-suite.js",
+    "test:bundle": "npm run test:schema && npm run test:tamper"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
