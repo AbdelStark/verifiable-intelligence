@@ -56,11 +56,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
       - name: Cargo test
         run: |
           mkdir -p reports/ci
           set -o pipefail
           cargo test --workspace --all-features --locked 2>&1 | tee reports/ci/cargo-test.log
+      - name: Error envelope schema
+        run: |
+          set -o pipefail
+          npm run test:error-envelopes 2>&1 | tee reports/ci/error-envelope-schema.log
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
