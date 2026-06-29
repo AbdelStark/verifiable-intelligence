@@ -33,6 +33,24 @@ jobs:
           name: ci-lint-${{ github.run_id }}
           path: reports/ci/
 
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Actionlint workflows
+        run: |
+          mkdir -p reports/ci
+          set -o pipefail
+          npm run test:workflows 2>&1 | tee reports/ci/actionlint.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-actionlint-${{ github.run_id }}
+          path: reports/ci/
+
   stable-test:
     runs-on: ubuntu-latest
     steps:

@@ -14,6 +14,7 @@
     "test:commitllm-rename-watch": "node scripts/ci/watch-commitllm-rename.js --self-test",
     "test:secret-scan": "node scripts/ci/secret-scan.js --self-test && node scripts/ci/secret-scan.js",
     "test:size-budget": "node scripts/ci/check-size-budgets.js",
+    "test:workflows": "scripts/ci/test-actionlint.sh",
     "bench:browser": "node scripts/ci/collect-browser-perf.js",
     "test:schema": "node scripts/validate-viex-fixtures.js",
     "test:tamper": "node scripts/test-viex-tamper-suite.js",
