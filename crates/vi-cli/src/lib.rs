@@ -15,11 +15,17 @@ use std::{
     sync::Once,
 };
 
-use clap::{Parser, Subcommand};
+use clap::{error::ErrorKind, Args, Parser, Subcommand};
 use vi_errors::{ErrorEnvelope, IdentityFields, NetworkErrorKind, PhaseId, ViError};
 
 const SUBCOMMAND: &str = "vi";
 const TEST_HOOKS_ENV: &str = "VI_ENABLE_TEST_HOOKS";
+const ENDPOINT_ENV: &str = "VI_ENDPOINT";
+const API_KEY_ENV: &str = "VI_API_KEY";
+const LOG_ENV: &str = "VI_LOG";
+const RUST_LOG_ENV: &str = "RUST_LOG";
+const NO_COLOR_ENV: &str = "VI_NO_COLOR";
+const ANSI_NO_COLOR_ENV: &str = "NO_COLOR";
 const TRACE_ID_ENV: &str = "VI_TRACE_ID";
 
 static PANIC_HOOK: Once = Once::new();
@@ -33,14 +39,53 @@ pub struct Output {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "vi", version, about = "Verifiable Intelligence CLI")]
+#[command(
+    name = "vi",
+    version,
+    about = "Verifiable Intelligence CLI",
+    disable_help_subcommand = true
+)]
 struct Cli {
+    #[arg(
+        long,
+        global = true,
+        help = "Format the same output object for humans instead of compact JSON"
+    )]
+    pretty: bool,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "FILTER",
+        help = "Log filter; overrides VI_LOG and RUST_LOG"
+    )]
+    log: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "TOKEN",
+        help = "Provider API key; VI_API_KEY is preferred"
+    )]
+    api_key: Option<String>,
+
+    #[arg(long, global = true, help = "Disable ANSI color in pretty output")]
+    no_color: bool,
+
     #[command(subcommand)]
-    command: Option<BoundaryCommand>,
+    command: Option<CliCommand>,
 }
 
 #[derive(Debug, Subcommand)]
-enum BoundaryCommand {
+enum CliCommand {
+    /// Generate a verifier key envelope.
+    Keygen(KeygenArgs),
+    /// Send a chat request to a receipt-capable provider.
+    Chat(ChatArgs),
+    /// Verify a receipt against a verifier key.
+    Verify(VerifyArgs),
+    /// Run the deferred terminal demo UI.
+    Tui(TuiArgs),
     #[command(name = "__panic", hide = true)]
     Panic,
     #[command(name = "__error", hide = true)]
@@ -48,6 +93,90 @@ enum BoundaryCommand {
         #[arg(value_name = "CATEGORY")]
         category: String,
     },
+}
+
+#[derive(Debug, Args)]
+struct KeygenArgs {}
+
+#[derive(Debug, Args)]
+struct ChatArgs {
+    #[arg(
+        short = 'e',
+        long,
+        value_name = "URL",
+        help = "Provider or broker endpoint; defaults to VI_ENDPOINT"
+    )]
+    endpoint: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct VerifyArgs {
+    #[arg(
+        short = 'e',
+        long,
+        value_name = "URL",
+        help = "Provider or audit endpoint; defaults to VI_ENDPOINT"
+    )]
+    endpoint: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct TuiArgs {
+    #[arg(
+        short = 'e',
+        long,
+        value_name = "URL",
+        help = "Provider or broker endpoint; defaults to VI_ENDPOINT"
+    )]
+    endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ResolvedConfig {
+    pretty: bool,
+    log: Option<String>,
+    api_key: Option<String>,
+    no_color: bool,
+    endpoint: Option<String>,
+}
+
+impl ResolvedConfig {
+    fn from_env(cli: &Cli) -> Self {
+        Self::from_sources(cli, |name| std::env::var_os(name))
+    }
+
+    fn from_sources<F>(cli: &Cli, mut env: F) -> Self
+    where
+        F: FnMut(&str) -> Option<OsString>,
+    {
+        let endpoint = command_endpoint(cli).map(ToOwned::to_owned).or_else(|| {
+            if command_uses_endpoint(cli) {
+                env_string(&mut env, ENDPOINT_ENV)
+            } else {
+                None
+            }
+        });
+        let log = cli
+            .log
+            .clone()
+            .or_else(|| env_string(&mut env, LOG_ENV))
+            .or_else(|| env_string(&mut env, RUST_LOG_ENV));
+        let api_key = cli
+            .api_key
+            .clone()
+            .or_else(|| env_string(&mut env, API_KEY_ENV));
+        let no_color = cli.no_color
+            || env_present(&mut env, NO_COLOR_ENV)
+            || env_present(&mut env, ANSI_NO_COLOR_ENV);
+
+        Self {
+            pretty: cli.pretty,
+            log,
+            api_key,
+            no_color,
+            endpoint,
+        }
+    }
 }
 
 /// Library dispatch entry point. Converts domain failures into `ViError`.
@@ -93,21 +222,40 @@ where
             }
         },
         Err(error) => {
+            let exit_code = match error.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => 0,
+                _ => vi_errors::USAGE_EXIT_CODE,
+            };
             if let Err(print_error) = error.print() {
                 eprintln!("failed to print clap error: {print_error}");
             }
-            vi_errors::USAGE_EXIT_CODE
+            exit_code
         }
     }
 }
 
 fn run_cli(cli: Cli) -> Result<Output, ViError> {
+    let config = ResolvedConfig::from_env(&cli);
+
     match cli.command {
-        Some(BoundaryCommand::Panic) => {
+        Some(CliCommand::Keygen(_)) => {
+            vi_keygen::placeholder();
+            stub_output("keygen", &config)
+        }
+        Some(CliCommand::Chat(_)) => {
+            vi_client::placeholder();
+            stub_output("chat", &config)
+        }
+        Some(CliCommand::Verify(_)) => {
+            vi_verifier::placeholder();
+            stub_output("verify", &config)
+        }
+        Some(CliCommand::Tui(_)) => run_tui_stub(&config),
+        Some(CliCommand::Panic) => {
             ensure_test_hooks_enabled()?;
             panic!("deliberate vi panic test hook");
         }
-        Some(BoundaryCommand::Error { category }) => {
+        Some(CliCommand::Error { category }) => {
             ensure_test_hooks_enabled()?;
             Err(sample_error(&category).unwrap_or_else(|| ViError::Input {
                 arg: "CATEGORY".to_owned(),
@@ -117,6 +265,73 @@ fn run_cli(cli: Cli) -> Result<Output, ViError> {
         }
         None => run(),
     }
+}
+
+fn run_tui_stub(config: &ResolvedConfig) -> Result<Output, ViError> {
+    #[cfg(feature = "tui")]
+    {
+        vi_tui::placeholder();
+        stub_output("tui", config)
+    }
+
+    #[cfg(not(feature = "tui"))]
+    {
+        let _ = config;
+        Err(ViError::UnsupportedTier {
+            requested: "tui".to_owned(),
+            reason: "the vi binary was built without the tui feature".to_owned(),
+        })
+    }
+}
+
+fn stub_output(subcommand: &'static str, config: &ResolvedConfig) -> Result<Output, ViError> {
+    let value = serde_json::json!({
+        "schema_version": 1,
+        "subcommand": subcommand,
+        "status": "stub",
+    });
+    let stdout = if config.pretty {
+        serde_json::to_string_pretty(&value)
+    } else {
+        serde_json::to_string(&value)
+    }
+    .map_err(|error| ViError::Internal {
+        backtrace: format!("failed to serialize {subcommand} stub output: {error}"),
+    })?;
+
+    Ok(Output {
+        stdout: Some(stdout),
+    })
+}
+
+fn command_endpoint(cli: &Cli) -> Option<&str> {
+    match &cli.command {
+        Some(CliCommand::Chat(args)) => args.endpoint.as_deref(),
+        Some(CliCommand::Verify(args)) => args.endpoint.as_deref(),
+        Some(CliCommand::Tui(args)) => args.endpoint.as_deref(),
+        Some(CliCommand::Keygen(_) | CliCommand::Panic | CliCommand::Error { .. }) | None => None,
+    }
+}
+
+fn command_uses_endpoint(cli: &Cli) -> bool {
+    matches!(
+        cli.command,
+        Some(CliCommand::Chat(_) | CliCommand::Verify(_) | CliCommand::Tui(_))
+    )
+}
+
+fn env_string<F>(env: &mut F, name: &str) -> Option<String>
+where
+    F: FnMut(&str) -> Option<OsString>,
+{
+    env(name).and_then(|value| value.into_string().ok().filter(|string| !string.is_empty()))
+}
+
+fn env_present<F>(env: &mut F, name: &str) -> bool
+where
+    F: FnMut(&str) -> Option<OsString>,
+{
+    env(name).is_some()
 }
 
 fn install_panic_hook() {
@@ -244,4 +459,84 @@ fn sample_error(category: &str) -> Option<ViError> {
         },
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_env_applies_only_to_endpoint_subcommands() {
+        let chat = Cli::try_parse_from(["vi", "chat"]).expect("chat parses");
+        let chat_config =
+            ResolvedConfig::from_sources(&chat, fake_env(&[(ENDPOINT_ENV, "https://env.example")]));
+        assert_eq!(chat_config.endpoint.as_deref(), Some("https://env.example"));
+
+        let chat_with_flag =
+            Cli::try_parse_from(["vi", "chat", "--endpoint", "https://flag.example"])
+                .expect("chat with endpoint parses");
+        let flag_config = ResolvedConfig::from_sources(
+            &chat_with_flag,
+            fake_env(&[(ENDPOINT_ENV, "https://env.example")]),
+        );
+        assert_eq!(
+            flag_config.endpoint.as_deref(),
+            Some("https://flag.example")
+        );
+
+        let keygen = Cli::try_parse_from(["vi", "keygen"]).expect("keygen parses");
+        let keygen_config = ResolvedConfig::from_sources(
+            &keygen,
+            fake_env(&[(ENDPOINT_ENV, "https://env.example")]),
+        );
+        assert_eq!(keygen_config.endpoint, None);
+    }
+
+    #[test]
+    fn log_precedence_is_flag_then_vi_log_then_rust_log() {
+        let env_only = Cli::try_parse_from(["vi", "verify"]).expect("verify parses");
+        let env_only_config = ResolvedConfig::from_sources(
+            &env_only,
+            fake_env(&[(LOG_ENV, "vi=debug"), (RUST_LOG_ENV, "warn")]),
+        );
+        assert_eq!(env_only_config.log.as_deref(), Some("vi=debug"));
+
+        let rust_log_only = Cli::try_parse_from(["vi", "verify"]).expect("verify parses");
+        let rust_log_config =
+            ResolvedConfig::from_sources(&rust_log_only, fake_env(&[(RUST_LOG_ENV, "warn")]));
+        assert_eq!(rust_log_config.log.as_deref(), Some("warn"));
+
+        let flag = Cli::try_parse_from(["vi", "--log", "trace", "verify"])
+            .expect("verify with log parses");
+        let flag_config = ResolvedConfig::from_sources(&flag, fake_env(&[(LOG_ENV, "vi=debug")]));
+        assert_eq!(flag_config.log.as_deref(), Some("trace"));
+    }
+
+    #[test]
+    fn api_key_and_no_color_precedence_are_resolved() {
+        let env_only = Cli::try_parse_from(["vi", "tui"]).expect("tui parses");
+        let env_only_config = ResolvedConfig::from_sources(
+            &env_only,
+            fake_env(&[(API_KEY_ENV, "env-token"), (ANSI_NO_COLOR_ENV, "")]),
+        );
+        assert_eq!(env_only_config.api_key.as_deref(), Some("env-token"));
+        assert!(env_only_config.no_color);
+
+        let flag = Cli::try_parse_from(["vi", "--api-key", "flag-token", "--no-color", "tui"])
+            .expect("tui with globals parses");
+        let flag_config = ResolvedConfig::from_sources(
+            &flag,
+            fake_env(&[(API_KEY_ENV, "env-token"), (NO_COLOR_ENV, "1")]),
+        );
+        assert_eq!(flag_config.api_key.as_deref(), Some("flag-token"));
+        assert!(flag_config.no_color);
+    }
+
+    fn fake_env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<OsString> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        }
+    }
 }
