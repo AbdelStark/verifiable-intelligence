@@ -40,6 +40,12 @@ npx playwright install chromium
 npm run test:demo
 ```
 
+Proof bundle fixture validation:
+
+```bash
+npm run test:schema
+```
+
 ## Why CommitLLM
 
 CommitLLM returns a compact receipt and opens trace data only when challenged. On supported open-weight deployments, verifier work is CPU-side and provider serving stays on the normal GPU path. Its current boundary matters: model identity, prompt/request binding, decode policy, delivered answer, and many execution checks are covered; arbitrary-position attention output on stock GPU kernels remains a documented open problem upstream.

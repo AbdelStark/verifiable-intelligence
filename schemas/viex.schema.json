@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abdelstark.github.io/verifiable-intelligence/schemas/viex.schema.json",
+  "title": "Verifiable Intelligence Exchange Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "magic",
+    "schema_version",
+    "created_unix_ms",
+    "quote",
+    "request",
+    "response",
+    "receipt",
+    "verifier",
+    "audit",
+    "report"
+  ],
+  "properties": {
+    "magic": { "const": "VIEX" },
+    "schema_version": { "const": 1 },
+    "created_unix_ms": { "type": "integer", "minimum": 0 },
+    "quote": { "$ref": "#/$defs/quote" },
+    "request": { "$ref": "#/$defs/request" },
+    "response": { "$ref": "#/$defs/response" },
+    "receipt": { "$ref": "#/$defs/receipt" },
+    "verifier": { "$ref": "#/$defs/verifier" },
+    "audit": { "$ref": "#/$defs/audit" },
+    "report": { "$ref": "#/$defs/report" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quote_id",
+        "provider_id",
+        "model_id",
+        "checkpoint_hash",
+        "commitllm_pin",
+        "key_hash",
+        "decode_policy_hash",
+        "price",
+        "expires_unix_ms",
+        "signature"
+      ],
+      "properties": {
+        "quote_id": { "$ref": "#/$defs/non_empty_string" },
+        "provider_id": { "$ref": "#/$defs/non_empty_string" },
+        "model_id": { "$ref": "#/$defs/non_empty_string" },
+        "checkpoint_hash": { "$ref": "#/$defs/sha256" },
+        "commitllm_pin": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "key_hash": { "$ref": "#/$defs/sha256" },
+        "decode_policy_hash": { "$ref": "#/$defs/sha256" },
+        "price": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency", "estimated", "per_1k_tokens"],
+          "properties": {
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "estimated": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$"
+            },
+            "per_1k_tokens": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$"
+            }
+          }
+        },
+        "expires_unix_ms": { "type": "integer", "minimum": 0 },
+        "signature": { "$ref": "#/$defs/non_empty_string" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "prompt_hash", "input_spec_hash", "max_tokens"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/non_empty_string" },
+        "prompt_hash": { "$ref": "#/$defs/sha256" },
+        "input_spec_hash": { "$ref": "#/$defs/sha256" },
+        "max_tokens": { "type": "integer", "minimum": 1 }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["prompt"] },
+          { "required": ["raw_prompt"] },
+          { "required": ["messages"] }
+        ]
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answer_hash", "generated_token_count", "output_spec_hash"],
+      "properties": {
+        "answer_hash": { "$ref": "#/$defs/sha256" },
+        "answer_preview": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "generated_token_count": { "type": "integer", "minimum": 0 },
+        "output_spec_hash": { "$ref": "#/$defs/sha256" }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["answer"] },
+          { "required": ["raw_answer"] },
+          { "required": ["text"] }
+        ]
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "content_type", "sha256", "size_bytes"],
+      "properties": {
+        "encoding": {
+          "enum": ["base64", "external_sha256", "missing"]
+        },
+        "content_type": {
+          "const": "application/vnd.verifiable-intelligence.receipt+binary"
+        },
+        "bytes_b64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_hash",
+        "key_ref",
+        "commitllm_pin",
+        "verifier_version",
+        "verification_mode"
+      ],
+      "properties": {
+        "key_hash": { "$ref": "#/$defs/sha256" },
+        "key_ref": { "$ref": "#/$defs/non_empty_string" },
+        "commitllm_pin": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "verifier_version": { "$ref": "#/$defs/non_empty_string" },
+        "verification_mode": {
+          "enum": ["browser-wasm", "browser-simulated", "server", "cli"]
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audit_endpoint", "tier", "challenge", "payload_hash"],
+      "properties": {
+        "audit_endpoint": { "$ref": "#/$defs/non_empty_string" },
+        "tier": {
+          "enum": ["receipt-only", "routine", "deep", "full"]
+        },
+        "challenge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["token_index", "layer_indices"],
+          "properties": {
+            "token_index": { "type": "integer", "minimum": 0 },
+            "layer_indices": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "uniqueItems": true
+            }
+          }
+        },
+        "payload_hash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall",
+        "checked_at_unix_ms",
+        "checks",
+        "warnings",
+        "unsupported"
+      ],
+      "properties": {
+        "overall": {
+          "enum": ["pass", "fail", "unsupported", "not_run"]
+        },
+        "checked_at_unix_ms": { "type": "integer", "minimum": 0 },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/check" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "unsupported": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "class", "status", "detail"],
+      "properties": {
+        "id": { "$ref": "#/$defs/non_empty_string" },
+        "class": {
+          "enum": ["exact", "algebraic", "statistical", "audited", "open", "structural"]
+        },
+        "status": {
+          "enum": ["pass", "fail", "warn", "unsupported", "not_run"]
+        },
+        "field": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+|\\[[0-9]+\\])*$"
+        },
+        "detail": { "$ref": "#/$defs/non_empty_string" }
+      }
+    }
+  }
+}
