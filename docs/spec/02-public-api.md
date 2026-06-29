@@ -155,6 +155,29 @@ The provider API inherits the old receipt surface:
 - `POST /v1/audit`
 - `GET /healthz`
 
+### `POST /v1/audit`
+
+Request:
+
+```json
+{
+  "receipt_hash": "sha256:...",
+  "tier": "deep",
+  "challenge": {
+    "token_index": 12,
+    "layer_indices": [1, 7, 13]
+  }
+}
+```
+
+Response:
+
+- Status: `200 OK`
+- Content-Type: `application/vnd.verifiable-intelligence.audit+binary`
+- Body: raw `VIAU` envelope bytes bound to the receipt hash, tier, token index, and layer indices.
+
+Non-2xx responses are client `network` errors carrying the HTTP status. Verification of the `VIAU` bytes is performed by the verifier, not by the transport client.
+
 `/healthz` must include:
 
 ```json
