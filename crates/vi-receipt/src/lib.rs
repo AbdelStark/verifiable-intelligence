@@ -6,13 +6,16 @@
 // RFC-0003 parsing failures must flow through the shared `ViError` taxonomy.
 #![allow(clippy::result_large_err)]
 
-use vi_errors::ViError;
+use vi_errors::{IdentityFields, ViError};
 
 /// Supported v1 binary-envelope version.
 pub const ENVELOPE_VERSION: u8 = 1;
 
 /// Supported v1 verifier-key binding schema version.
 pub const KEYGEN_SCHEMA_VERSION: u16 = 1;
+
+/// Supported v1 receipt binding schema version.
+pub const RECEIPT_SCHEMA_VERSION: u16 = 1;
 
 /// Reserved v1 flags value.
 pub const ENVELOPE_FLAGS: u8 = 0;
@@ -113,6 +116,64 @@ impl KeyBindingHeader {
             checkpoint_hash: checkpoint_hash.into(),
             commitllm_pin: commitllm_pin.into(),
         }
+    }
+
+    /// Identity fields shared with receipts for cross-binding checks.
+    #[must_use]
+    pub fn identity_fields(&self) -> IdentityFields {
+        IdentityFields::new(&self.model_id, &self.checkpoint_hash, &self.commitllm_pin)
+    }
+}
+
+/// Receipt identity binding header carried inside `VIRC` payloads.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReceiptBindingHeader {
+    /// Receipt binding schema version.
+    pub receipt_schema_version: u16,
+    /// Public model identifier.
+    pub model_id: String,
+    /// Canonical checkpoint hash.
+    pub checkpoint_hash: String,
+    /// Pinned upstream `CommitLLM` short revision.
+    pub commitllm_pin: String,
+    /// Hash of the verifier key envelope expected for this receipt.
+    pub key_hash: String,
+    /// Hash of canonical prompt bytes or prompt representation.
+    pub prompt_hash: String,
+    /// Hash of delivered answer bytes.
+    pub answer_hash: String,
+    /// Number of generated tokens bound by the receipt.
+    pub generated_token_count: u64,
+}
+
+impl ReceiptBindingHeader {
+    /// Construct a v1 receipt binding header.
+    #[must_use]
+    pub fn new(
+        model_id: impl Into<String>,
+        checkpoint_hash: impl Into<String>,
+        commitllm_pin: impl Into<String>,
+        key_hash: impl Into<String>,
+        prompt_hash: impl Into<String>,
+        answer_hash: impl Into<String>,
+        generated_token_count: u64,
+    ) -> Self {
+        Self {
+            receipt_schema_version: RECEIPT_SCHEMA_VERSION,
+            model_id: model_id.into(),
+            checkpoint_hash: checkpoint_hash.into(),
+            commitllm_pin: commitllm_pin.into(),
+            key_hash: key_hash.into(),
+            prompt_hash: prompt_hash.into(),
+            answer_hash: answer_hash.into(),
+            generated_token_count,
+        }
+    }
+
+    /// Identity fields shared with verifier keys for cross-binding checks.
+    #[must_use]
+    pub fn identity_fields(&self) -> IdentityFields {
+        IdentityFields::new(&self.model_id, &self.checkpoint_hash, &self.commitllm_pin)
     }
 }
 
@@ -242,7 +303,7 @@ pub fn decode_key_binding_header(bytes: &[u8]) -> Result<(KeyBindingHeader, usiz
         return Err(corrupt_envelope("VIKY", 4, "binding_crc32 mismatch"));
     }
 
-    let mut reader = BindingReader::new(body);
+    let mut reader = BindingReader::new("VIKY", body);
     let keygen_schema_version = reader.read_u16()?;
     validate_keygen_schema_version(keygen_schema_version)?;
     let seed = reader.read_u64()?;
@@ -261,6 +322,136 @@ pub fn decode_key_binding_header(bytes: &[u8]) -> Result<(KeyBindingHeader, usiz
         },
         body_end,
     ))
+}
+
+/// Encode a v1 `VIRC` receipt binding header.
+///
+/// Layout:
+/// `[body_len:u32le][body_crc32c:u32le][receipt_schema_version:u16le]`
+/// `[generated_token_count:u64le]` followed by `model_id`, `checkpoint_hash`,
+/// `commitllm_pin`, `key_hash`, `prompt_hash`, and `answer_hash` as
+/// `[len:u16le][utf8 bytes]`.
+pub fn encode_receipt_binding_header(header: &ReceiptBindingHeader) -> Result<Vec<u8>, ViError> {
+    validate_receipt_schema_version(header.receipt_schema_version)?;
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&header.receipt_schema_version.to_le_bytes());
+    body.extend_from_slice(&header.generated_token_count.to_le_bytes());
+    write_string(&mut body, "model_id", &header.model_id)?;
+    write_string(&mut body, "checkpoint_hash", &header.checkpoint_hash)?;
+    write_string(&mut body, "commitllm_pin", &header.commitllm_pin)?;
+    write_string(&mut body, "key_hash", &header.key_hash)?;
+    write_string(&mut body, "prompt_hash", &header.prompt_hash)?;
+    write_string(&mut body, "answer_hash", &header.answer_hash)?;
+
+    let body_len = u32::try_from(body.len()).map_err(|_| ViError::Input {
+        arg: "receipt_binding_header".to_owned(),
+        reason: "header body exceeds u32 length".to_owned(),
+        detail: None,
+    })?;
+    let crc = crc32c(&body);
+
+    let mut bytes = Vec::with_capacity(KEY_BINDING_PREFIX_LEN + body.len());
+    bytes.extend_from_slice(&body_len.to_le_bytes());
+    bytes.extend_from_slice(&crc.to_le_bytes());
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
+}
+
+/// Decode a v1 `VIRC` receipt binding header and return its consumed byte length.
+pub fn decode_receipt_binding_header(
+    bytes: &[u8],
+) -> Result<(ReceiptBindingHeader, usize), ViError> {
+    if bytes.len() < KEY_BINDING_PREFIX_LEN {
+        return Err(corrupt_envelope(
+            "VIRC",
+            bytes.len(),
+            "binding header shorter than 8-byte prefix",
+        ));
+    }
+
+    let body_len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let expected_crc = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    let body_end = KEY_BINDING_PREFIX_LEN
+        .checked_add(body_len)
+        .ok_or_else(|| {
+            corrupt_envelope(
+                "VIRC",
+                KEY_BINDING_PREFIX_LEN,
+                "binding header length overflows",
+            )
+        })?;
+
+    if body_end > bytes.len() {
+        return Err(corrupt_envelope(
+            "VIRC",
+            KEY_BINDING_PREFIX_LEN,
+            "binding header length overruns payload",
+        ));
+    }
+
+    let body = &bytes[KEY_BINDING_PREFIX_LEN..body_end];
+    let actual_crc = crc32c(body);
+    if actual_crc != expected_crc {
+        return Err(corrupt_envelope("VIRC", 4, "binding_crc32 mismatch"));
+    }
+
+    let mut reader = BindingReader::new("VIRC", body);
+    let receipt_schema_version = reader.read_u16()?;
+    validate_receipt_schema_version(receipt_schema_version)?;
+    let generated_token_count = reader.read_u64()?;
+    let model_id = reader.read_string()?;
+    let checkpoint_hash = reader.read_string()?;
+    let commitllm_pin = reader.read_string()?;
+    let key_hash = reader.read_string()?;
+    let prompt_hash = reader.read_string()?;
+    let answer_hash = reader.read_string()?;
+    reader.finish()?;
+
+    Ok((
+        ReceiptBindingHeader {
+            receipt_schema_version,
+            model_id,
+            checkpoint_hash,
+            commitllm_pin,
+            key_hash,
+            prompt_hash,
+            answer_hash,
+            generated_token_count,
+        },
+        body_end,
+    ))
+}
+
+/// Prefix opaque `CommitLLM` receipt bytes with a receipt binding header.
+pub fn encode_virc_payload(
+    header: &ReceiptBindingHeader,
+    commitllm_receipt: &[u8],
+) -> Result<Vec<u8>, ViError> {
+    let mut payload = encode_receipt_binding_header(header)?;
+    payload.extend_from_slice(commitllm_receipt);
+    Ok(payload)
+}
+
+/// Split a `VIRC` payload into its binding header and opaque `CommitLLM` receipt bytes.
+pub fn decode_virc_payload(payload: &[u8]) -> Result<(ReceiptBindingHeader, &[u8]), ViError> {
+    let (header, consumed) = decode_receipt_binding_header(payload)?;
+    Ok((header, &payload[consumed..]))
+}
+
+/// Ensure a receipt binds to the same identity as the verifier key.
+pub fn check_receipt_identity(
+    key: &KeyBindingHeader,
+    receipt: &ReceiptBindingHeader,
+) -> Result<(), ViError> {
+    let expected = key.identity_fields();
+    let actual = receipt.identity_fields();
+
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(ViError::IdentityMismatch { expected, actual })
+    }
 }
 
 /// Prefix opaque `CommitLLM` key bytes with a key binding header.
@@ -313,6 +504,19 @@ fn validate_keygen_schema_version(version: u16) -> Result<(), ViError> {
     }
 }
 
+fn validate_receipt_schema_version(version: u16) -> Result<(), ViError> {
+    if version == RECEIPT_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(ViError::UnknownVersion {
+            envelope: "VIRC",
+            field: "receipt_schema_version",
+            value: u32::from(version),
+            supported: vec![u32::from(RECEIPT_SCHEMA_VERSION)],
+        })
+    }
+}
+
 fn write_string(bytes: &mut Vec<u8>, field: &str, value: &str) -> Result<(), ViError> {
     let len = u16::try_from(value.len()).map_err(|_| ViError::Input {
         arg: field.to_owned(),
@@ -329,13 +533,18 @@ fn crc32c(bytes: &[u8]) -> u32 {
 }
 
 struct BindingReader<'a> {
+    envelope: &'static str,
     bytes: &'a [u8],
     offset: usize,
 }
 
 impl<'a> BindingReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
+    fn new(envelope: &'static str, bytes: &'a [u8]) -> Self {
+        Self {
+            envelope,
+            bytes,
+            offset: 0,
+        }
     }
 
     fn read_u16(&mut self) -> Result<u16, ViError> {
@@ -357,7 +566,7 @@ impl<'a> BindingReader<'a> {
         let bytes = self.read_exact(len, "length-prefixed string overruns binding header")?;
         std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
             corrupt_envelope(
-                "VIKY",
+                self.envelope,
                 len_offset.max(string_offset),
                 "invalid UTF-8 string",
             )
@@ -366,10 +575,14 @@ impl<'a> BindingReader<'a> {
 
     fn read_exact(&mut self, len: usize, reason: &'static str) -> Result<&'a [u8], ViError> {
         let end = self.offset.checked_add(len).ok_or_else(|| {
-            corrupt_envelope("VIKY", self.offset, "binding header offset overflows")
+            corrupt_envelope(
+                self.envelope,
+                self.offset,
+                "binding header offset overflows",
+            )
         })?;
         if end > self.bytes.len() {
-            return Err(corrupt_envelope("VIKY", self.offset, reason));
+            return Err(corrupt_envelope(self.envelope, self.offset, reason));
         }
 
         let bytes = &self.bytes[self.offset..end];
@@ -382,7 +595,7 @@ impl<'a> BindingReader<'a> {
             Ok(())
         } else {
             Err(corrupt_envelope(
-                "VIKY",
+                self.envelope,
                 self.offset,
                 "trailing bytes in binding header",
             ))
@@ -401,13 +614,16 @@ fn corrupt_envelope(envelope: &'static str, offset: usize, reason: &'static str)
 #[cfg(test)]
 mod tests {
     use super::{
-        decode, decode_key_binding_header, decode_viky_payload, encode, encode_key_binding_header,
-        encode_viky_payload, Envelope, KeyBindingHeader, Magic, ENVELOPE_FLAGS, ENVELOPE_VERSION,
-        HEADER_LEN, KEYGEN_SCHEMA_VERSION,
+        check_receipt_identity, decode, decode_key_binding_header, decode_viky_payload,
+        decode_virc_payload, encode, encode_key_binding_header, encode_receipt_binding_header,
+        encode_viky_payload, encode_virc_payload, Envelope, KeyBindingHeader, Magic,
+        ReceiptBindingHeader, ENVELOPE_FLAGS, ENVELOPE_VERSION, HEADER_LEN, KEYGEN_SCHEMA_VERSION,
+        RECEIPT_SCHEMA_VERSION,
     };
     use proptest::prelude::{any, prop_oneof, Just, ProptestConfig};
+    use proptest::string::string_regex;
     use proptest::{collection, proptest};
-    use vi_errors::ViError;
+    use vi_errors::{IdentityFields, ViError};
 
     fn magic_strategy() -> impl proptest::strategy::Strategy<Value = Magic> {
         prop_oneof![Just(Magic::VIKY), Just(Magic::VIRC), Just(Magic::VIAU)]
@@ -425,6 +641,33 @@ mod tests {
 
             proptest::prop_assert_eq!(decoded, envelope);
             proptest::prop_assert_eq!(bytes.len(), expected_len);
+        }
+
+        #[test]
+        fn receipt_binding_header_round_trips(
+            model_id in string_regex("[a-z0-9:_\\-.]{0,64}").expect("valid model regex"),
+            checkpoint_hash in string_regex("[a-z0-9:_\\-.]{0,96}").expect("valid checkpoint regex"),
+            commitllm_pin in string_regex("[a-f0-9]{8}").expect("valid pin regex"),
+            key_hash in string_regex("sha256:[a-f0-9]{8,64}").expect("valid key hash regex"),
+            prompt_hash in string_regex("sha256:[a-f0-9]{8,64}").expect("valid prompt hash regex"),
+            answer_hash in string_regex("sha256:[a-f0-9]{8,64}").expect("valid answer hash regex"),
+            generated_token_count in any::<u64>(),
+            receipt_bytes in collection::vec(any::<u8>(), 0..1024),
+        ) {
+            let header = ReceiptBindingHeader::new(
+                model_id,
+                checkpoint_hash,
+                commitllm_pin,
+                key_hash,
+                prompt_hash,
+                answer_hash,
+                generated_token_count,
+            );
+            let payload = encode_virc_payload(&header, &receipt_bytes)?;
+            let (decoded, receipt) = decode_virc_payload(&payload)?;
+
+            proptest::prop_assert_eq!(decoded, header);
+            proptest::prop_assert_eq!(receipt, receipt_bytes.as_slice());
         }
     }
 
@@ -591,12 +834,115 @@ mod tests {
         );
     }
 
+    #[test]
+    fn receipt_binding_generated_token_count_zero_is_parseable() {
+        let header = ReceiptBindingHeader::new(
+            "llama-3.1-8b-w8a8",
+            "sha256:checkpoint",
+            "25541e83",
+            "sha256:key",
+            "sha256:prompt",
+            "sha256:answer",
+            0,
+        );
+        let payload =
+            encode_virc_payload(&header, b"opaque-receipt").expect("header should encode");
+        let (decoded, receipt) = decode_virc_payload(&payload).expect("header should decode");
+
+        assert_eq!(decoded.generated_token_count, 0);
+        assert_eq!(decoded, header);
+        assert_eq!(receipt, b"opaque-receipt");
+    }
+
+    #[test]
+    fn receipt_identity_mismatch_includes_expected_and_actual() {
+        let key = KeyBindingHeader::new("llama-3.1-8b-w8a8", "sha256:checkpoint", "25541e83", 7);
+        let receipt = ReceiptBindingHeader::new(
+            "qwen2.5-7b-w8a8",
+            "sha256:checkpoint",
+            "25541e83",
+            "sha256:key",
+            "sha256:prompt",
+            "sha256:answer",
+            32,
+        );
+
+        let error =
+            check_receipt_identity(&key, &receipt).expect_err("identity mismatch should fail");
+        assert_eq!(
+            error,
+            ViError::IdentityMismatch {
+                expected: IdentityFields::new("llama-3.1-8b-w8a8", "sha256:checkpoint", "25541e83"),
+                actual: IdentityFields::new("qwen2.5-7b-w8a8", "sha256:checkpoint", "25541e83"),
+            }
+        );
+    }
+
+    #[test]
+    fn receipt_identity_match_passes() {
+        let key = realistic_key_header();
+        let receipt = realistic_receipt_header();
+
+        check_receipt_identity(&key, &receipt).expect("matching identity should pass");
+    }
+
+    #[test]
+    fn receipt_binding_crc_mismatch_is_corrupt_envelope() {
+        let header = realistic_receipt_header();
+        let mut encoded = encode_receipt_binding_header(&header).expect("header should encode");
+        let last = encoded
+            .last_mut()
+            .expect("encoded header should not be empty");
+        *last ^= 0xff;
+
+        let error =
+            super::decode_receipt_binding_header(&encoded).expect_err("CRC mismatch should fail");
+        assert_eq!(
+            error,
+            ViError::CorruptEnvelope {
+                envelope: "VIRC",
+                offset: 4,
+                reason: "binding_crc32 mismatch",
+            }
+        );
+    }
+
+    #[test]
+    fn receipt_binding_unknown_schema_version_is_unknown_version() {
+        let header = ReceiptBindingHeader {
+            receipt_schema_version: 2,
+            ..realistic_receipt_header()
+        };
+        let error = encode_receipt_binding_header(&header).expect_err("unknown schema should fail");
+        assert_eq!(
+            error,
+            ViError::UnknownVersion {
+                envelope: "VIRC",
+                field: "receipt_schema_version",
+                value: 2,
+                supported: vec![u32::from(RECEIPT_SCHEMA_VERSION)],
+            }
+        );
+    }
+
     fn realistic_key_header() -> KeyBindingHeader {
         KeyBindingHeader::new(
             "llama-3.1-8b-w8a8",
             "sha256:0123456789abcdef",
             "25541e83",
             7,
+        )
+    }
+
+    fn realistic_receipt_header() -> ReceiptBindingHeader {
+        ReceiptBindingHeader::new(
+            "llama-3.1-8b-w8a8",
+            "sha256:0123456789abcdef",
+            "25541e83",
+            "sha256:key",
+            "sha256:prompt",
+            "sha256:answer",
+            32,
         )
     }
 }
