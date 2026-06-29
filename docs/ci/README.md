@@ -10,7 +10,7 @@ update this page in the same pull request.
 |---------------|--------------|---------|------------------|-----------------------|
 | `.github/workflows/ci.yml` | CI | Pull requests and pushes to `main` | 5-10 minutes | Failure artifacts under `reports/ci/`; size-budget artifacts under `reports/perf/`; Playwright failure output under `test-results/` and `playwright-report/` |
 | `.github/workflows/keygen-determinism.yml` | Keygen Determinism | Pull requests and pushes to `main` that touch keygen or workspace dependency paths | 2-5 minutes | Job logs only |
-| `.github/workflows/nightly.yml` | Nightly | Daily cron at 03:17 UTC and manual dispatch | 2-5 minutes for the current browser verifier benchmark | `reports/perf/` uploaded as `nightly-browser-verifier-${{ github.run_id }}` |
+| `.github/workflows/nightly.yml` | Nightly | Daily browser cron at 03:17 UTC, weekly provider-image cron at 03:43 UTC Sunday, and manual dispatch | 2-15 minutes depending on selected jobs | `reports/perf/` uploaded as `nightly-browser-verifier-${{ github.run_id }}` or `nightly-provider-image-${{ github.run_id }}` |
 | `.github/workflows/proof-bundle.yml` | Proof Bundle | Pull requests and pushes to `main` that touch proof-bundle, broker, docs, schema, script, or package paths | 1-3 minutes | Job logs only |
 | `.github/workflows/static-demo-pages.yml` | Static Demo Pages | Tag pushes matching `demo-v*` and manual dispatch | 1-3 minutes | GitHub Pages artifact containing `demo/index.html`, `.nojekyll`, and `release.json` |
 | `.github/workflows/watch-commitllm-rename.yml` | Watch CommitLLM Rename | Daily cron at 07:37 UTC and manual dispatch | Less than 1 minute unless GitHub API is slow | Job logs; may open a tracking issue when upstream rename evidence changes |

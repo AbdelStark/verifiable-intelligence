@@ -59,3 +59,13 @@ and tampered-receipt fixture checks, and uploads `reports/perf/browser-verifier.
 The benchmark is measurement-only. If a number misses the published target, the
 project should update the claim or add a new issue with the measured regression
 instead of hiding the result.
+
+## Weekly Provider Image Drift Check
+
+`nightly.yml` also builds the provider image with `--no-cache` on Sundays and on
+manual dispatch. It runs the CPU-stub smoke, records the image size and image ID
+under `reports/perf/provider-image-no-cache-summary.md`, and fails if the image
+exceeds the same 8 GiB limit used by per-PR provider-image CI.
+
+This job catches base-image drift. It is not evidence that the live GPU path or
+canonical W8A8 weights are ready.
